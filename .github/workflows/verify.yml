@@ -1,0 +1,27 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.14.0
+      - name: Verify seed profiles and runtime contracts
+        run: |
+          node scripts/build-seed-profile.mjs --verify-only
+          node --test tests/unit/*.test.mjs
+          node tests/integration/contract.mjs
+      - name: Build and exercise the real container
+        run: bash tests/integration/container-smoke.sh

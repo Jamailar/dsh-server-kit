@@ -1,0 +1,15 @@
+{
+  "name": "dsh-server-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:contract": "node tests/integration/contract.mjs",
+    "preflight": "node scripts/preflight-upgrade.mjs",
+    "seed:verify": "node scripts/build-seed-profile.mjs --verify-only"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
