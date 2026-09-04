@@ -81,6 +81,16 @@ curl --fail \
 
 默认初始化模式不需要环境变量，也不显示一次性码。它仅适用于你能控制第一个 `/setup` 访问者的情形。若域名已经公开，在启动命令中额外加上 `--env DSH_SETUP_PROTECTION=code`；然后从 `docker logs dsh-server-kit` 取得一次性码并填入页面。初始化完成后该码会删除。
 
+### 首次初始化排查
+
+初始化失败时先查看容器日志：
+
+```sh
+docker logs --tail 100 dsh-server-kit
+```
+
+日志使用 JSON 事件，不记录管理员密码或一次性初始化码。重点关注 `setup_auth_user_failed`（Auth Gate 的具体失败原因）、`setup_existing_admin_password_mismatch`（已有同名管理员但密码不同）、`setup_runtime_config_write_failed`（`/data` 不可写）和 `setup_request_failed`（请求校验或最终失败）。若首次请求在管理员创建后中断，使用同一用户名与同一密码再次提交即可安全完成域名配置；密码不匹配时不会覆盖已有账户。
+
 ### 4. 持久化数据说明
 
 唯一的 Volume 挂载到容器 `/data`，内部目录如下：

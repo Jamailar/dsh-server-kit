@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 
 const listenHost = process.env.SETUP_HOST ?? '0.0.0.0'
@@ -10,6 +11,7 @@ const configPath = process.env.RUNTIME_CONFIG_PATH ?? '/data/dsh-server/runtime-
 const setupCodePath = process.env.SETUP_CODE_PATH ?? '/data/dsh-server/setup-code'
 const dshHome = process.env.DSH_HOME ?? '/data/dsh'
 const authCli = process.env.AUTH_GATE_CLI ?? join(dshHome, 'profiles', 'web', 'node_modules', 'dsh-auth-gate', 'lib', 'cli.js')
+const authGatePackageRoot = process.env.AUTH_GATE_PACKAGE_ROOT ?? dirname(dirname(authCli))
 const setupProtection = process.env.DSH_SETUP_PROTECTION ?? 'open'
 const requireSetupCode = setupProtection === 'code'
 
@@ -22,7 +24,7 @@ let completing = false
 function html(res, statusCode, body) {
   res.writeHead(statusCode, {
     'cache-control': 'no-store',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     'content-type': 'text/html; charset=utf-8',
     'referrer-policy': 'no-referrer',
     'x-content-type-options': 'nosniff',
@@ -38,6 +40,35 @@ function json(res, statusCode, value) {
     'content-length': Buffer.byteLength(body),
   })
   res.end(body)
+}
+
+function wantsJson(req) {
+  return String(req.headers.accept ?? '').split(',').some((value) => value.trim().startsWith('application/json'))
+}
+
+function setupLog(event, details = {}) {
+  process.stderr.write(`${JSON.stringify({ event, ...details })}\n`)
+}
+
+function diagnostic(value) {
+  return String(value).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 512)
+}
+
+function errorDetails(error) {
+  return {
+    ...(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? { code: error.code } : {}),
+    message: diagnostic(error instanceof Error ? error.message : error),
+  }
+}
+
+function setupError(req, res, statusCode, { authority = '', username = '', error }) {
+  if (wantsJson(req)) return json(res, statusCode, { error })
+  return html(res, statusCode, page({ authority, username, error }))
+}
+
+function setupComplete(req, res) {
+  if (wantsJson(req)) return json(res, 202, { status: 'initializing' })
+  return html(res, 202, '<!doctype html><meta charset="utf-8"><title>初始化完成</title><p>初始化完成，DSH 正在启动。请在几秒后刷新当前页面。</p>')
 }
 
 function svg(res, body) {
@@ -68,10 +99,10 @@ function validUsername(value) {
   return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value)
 }
 
-function page({ authority = '', error = '' } = {}) {
-  const message = error === '' ? '' : `<p class="error">${escapeHtml(error)}</p>`
+function page({ authority = '', username = '', error = '' } = {}) {
+  const message = error === '' ? '' : `<p class="error" role="alert">${escapeHtml(error)}</p>`
   const setupCodeInput = requireSetupCode
-    ? '<label>一次性初始化码</label><input name="setupCode" type="password" required autocomplete="one-time-code">'
+    ? '<label for="setupCode">一次性初始化码</label><input id="setupCode" name="setupCode" type="password" required autocomplete="one-time-code">'
     : ''
   const protectionHint = requireSetupCode
     ? '输入容器日志中的一次性初始化码，创建管理员并确认公开访问域名。'
@@ -79,9 +110,9 @@ function page({ authority = '', error = '' } = {}) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>初始化 — DeepSeek Harness</title><style>
-:root{color-scheme:light dark;--bg:#f7f8fa;--surface:#fff;--text:#1f2329;--secondary:#6b7280;--border:rgb(0 0 0 / 10%);--input:#fff;--primary:#4176e6;--primary-hover:#567ffe;--ring:rgb(65 118 230 / 18%);--error:#b42318;--error-bg:#fff5f4;--error-border:#fecdc9}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px}.card{width:min(440px,100%);padding:38px 32px 32px;border:.5px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 12px 32px rgb(15 23 42 / 7%)}.brand{display:flex;align-items:center;justify-content:center;gap:7px;margin:0 0 24px;font-size:20px;font-weight:650;letter-spacing:-.025em}.brand img{display:block;width:32px;height:32px}.brand-suffix{color:var(--secondary);font-weight:500}h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:-.02em}p{margin:0;color:var(--secondary)}.hint{margin:6px 0 0;font-size:13px}label{display:block;margin:16px 0 6px;font-size:14px;font-weight:500}input{width:100%;height:44px;padding:0 13px;border:.5px solid var(--border);border-radius:10px;background:var(--input);color:var(--text);font:inherit;outline:none;transition:border-color .15s,box-shadow .15s}input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--ring)}button{margin-top:24px;width:100%;height:44px;padding:0;border:0;border-radius:10px;background:var(--primary);color:#fff;font:600 15px/1 inherit;cursor:pointer;transition:background .15s,transform .05s}button:hover{background:var(--primary-hover)}button:active{transform:scale(.99)}button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ring)}.error{margin:20px 0 0;padding:10px 12px;border:1px solid var(--error-border);border-radius:10px;background:var(--error-bg);color:var(--error);font-size:14px}@media (prefers-color-scheme:dark){:root{--bg:#17171a;--surface:#202024;--text:#f4f4f5;--secondary:#a1a1aa;--border:rgb(255 255 255 / 12%);--input:#27272c;--primary:#567ffe;--primary-hover:#6b90ff;--ring:rgb(103 158 254 / 24%);--error:#fecaca;--error-bg:rgb(127 29 29 / 35%);--error-border:rgb(248 113 113 / 36%)}.card{box-shadow:0 18px 38px rgb(0 0 0 / 24%)}}@media (prefers-reduced-motion:reduce){input,button{transition:none}button:active{transform:none}}@media (max-width:420px){body{padding:16px}.card{padding:32px 24px 26px}}</style></head>
-<body><main class="card"><div class="brand" aria-label="DeepSeek Harness"><img src="/favicon.svg" width="32" height="32" alt=""><span>DeepSeek</span><span class="brand-suffix">Harness</span></div><h1>初始化</h1><p>${protectionHint}</p>${message}
-<form method="post" action="/setup"><label>公开域名</label><input name="trustedHost" required value="${escapeHtml(authority)}" autocomplete="url" spellcheck="false"><label>管理员用户名</label><input name="username" required minlength="1" maxlength="64" autocomplete="username" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9_.-]*" title="只能使用字母、数字、点、下划线和连字符"><p class="hint">以字母或数字开头；只能使用字母、数字、点、下划线和连字符，不支持邮箱。</p><label>管理员密码</label><input name="password" type="password" required minlength="12" autocomplete="new-password"><label>确认密码</label><input name="passwordConfirm" type="password" required minlength="12" autocomplete="new-password">${setupCodeInput}<button type="submit">完成初始化</button></form></main></body></html>`
+:root{color-scheme:light dark;--bg:#f7f8fa;--surface:#fff;--text:#1f2329;--secondary:#6b7280;--border:rgb(0 0 0 / 10%);--input:#fff;--primary:#4176e6;--primary-hover:#567ffe;--ring:rgb(65 118 230 / 18%);--error:#b42318;--error-bg:#fff5f4;--error-border:#fecdc9}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px}.card{width:min(440px,100%);padding:38px 32px 32px;border:.5px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 12px 32px rgb(15 23 42 / 7%)}.brand{display:flex;align-items:center;justify-content:center;gap:7px;margin:0 0 24px;font-size:20px;font-weight:650;letter-spacing:-.025em}.brand img{display:block;width:32px;height:32px}.brand-suffix{color:var(--secondary);font-weight:500}h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:-.02em}p{margin:0;color:var(--secondary)}.hint{margin:6px 0 0;font-size:13px}label{display:block;margin:16px 0 6px;font-size:14px;font-weight:500}input{width:100%;height:44px;padding:0 13px;border:.5px solid var(--border);border-radius:10px;background:var(--input);color:var(--text);font:inherit;outline:none;transition:border-color .15s,box-shadow .15s}input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--ring)}button{margin-top:24px;width:100%;height:44px;padding:0;border:0;border-radius:10px;background:var(--primary);color:#fff;font:600 15px/1 inherit;cursor:pointer;transition:background .15s,transform .05s}button:hover{background:var(--primary-hover)}button:active{transform:scale(.99)}button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ring)}.error{margin:20px 0 0;padding:10px 12px;border:1px solid var(--error-border);border-radius:10px;background:var(--error-bg);color:var(--error);font-size:14px}@media (prefers-color-scheme:dark){:root{--bg:#17171a;--surface:#202024;--text:#f4f4f5;--secondary:#a1a1aa;--border:rgb(255 255 255 / 12%);--input:#27272c;--primary:#567ffe;--primary-hover:#6b90ff;--ring:rgb(103 158 254 / 24%);--error:#fecaca;--error-bg:rgb(127 29 29 / 35%);--error-border:rgb(248 113 113 / 36%)}.card{box-shadow:0 18px 38px rgb(0 0 0 / 24%)}}@media (prefers-reduced-motion:reduce){input,button{transition:none}button:active{transform:none}}@media (max-width:420px){body{padding:16px}.card{padding:32px 24px 26px}}input.invalid{border-color:var(--error);box-shadow:0 0 0 3px color-mix(in srgb,var(--error) 18%,transparent);animation:field-shake .32s ease-in-out}button:disabled{cursor:wait;opacity:.72}.error[hidden]{display:none}@keyframes field-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}@media (prefers-reduced-motion:reduce){input.invalid{animation:none}}</style></head>
+<body><main class="card"><div class="brand" aria-label="DeepSeek Harness"><img src="/favicon.svg" width="32" height="32" alt=""><span>DeepSeek</span><span class="brand-suffix">Harness</span></div><h1>初始化</h1><p>${protectionHint}</p>${message}<p id="setup-client-error" class="error" role="alert" hidden></p>
+<form id="setup-form" method="post" action="/setup" novalidate><label for="trustedHost">公开域名</label><input id="trustedHost" name="trustedHost" required value="${escapeHtml(authority)}" autocomplete="url" spellcheck="false"><label for="username">管理员用户名</label><input id="username" name="username" required minlength="1" maxlength="64" value="${escapeHtml(username)}" autocomplete="username" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9_.-]*" title="只能使用字母、数字、点、下划线和连字符" aria-describedby="username-hint"><p id="username-hint" class="hint">以字母或数字开头；只能使用字母、数字、点、下划线和连字符，不支持邮箱。</p><label for="password">管理员密码</label><input id="password" name="password" type="password" required minlength="12" autocomplete="new-password"><label for="passwordConfirm">确认密码</label><input id="passwordConfirm" name="passwordConfirm" type="password" required minlength="12" autocomplete="new-password">${setupCodeInput}<button type="submit">完成初始化</button></form></main><script>(()=>{const form=document.getElementById('setup-form');if(!form||!window.fetch)return;const error=document.getElementById('setup-client-error');const submit=form.querySelector('button[type="submit"]');const fields={trustedHost:form.elements.trustedHost,username:form.elements.username,password:form.elements.password,passwordConfirm:form.elements.passwordConfirm,setupCode:form.elements.setupCode};function show(message,input){error.textContent=message;error.hidden=false;if(!input)return;input.classList.remove('invalid');void input.offsetWidth;input.classList.add('invalid');input.setAttribute('aria-invalid','true');input.focus()}function clear(){error.hidden=true;for(const input of Object.values(fields)){if(input){input.classList.remove('invalid');input.removeAttribute('aria-invalid')}}}function validAuthority(value){if(!value||value.includes(',')||/\\s/.test(value)||value.includes('/')||value.includes('@'))return false;try{const parsed=new URL('http://'+value);return parsed.host===value&&parsed.pathname==='/'&&parsed.search===''&&parsed.hash===''}catch{return false}}function validate(){clear();if(!validAuthority(fields.trustedHost.value))return show('公开域名格式无效。',fields.trustedHost),false;if(!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(fields.username.value))return show('管理员用户名格式无效。',fields.username),false;if(fields.password.value.length<12)return show('密码至少需要 12 位。',fields.password),false;if(fields.password.value!==fields.passwordConfirm.value)return show('两次输入的密码不一致。',fields.passwordConfirm),false;if(fields.setupCode&&!/^[A-Za-z0-9_-]{32}$/.test(fields.setupCode.value))return show('一次性初始化码无效。',fields.setupCode),false;return true}form.addEventListener('input',clear);form.addEventListener('submit',async(event)=>{event.preventDefault();if(!validate())return;submit.disabled=true;try{const response=await fetch('/setup',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form)).toString(),credentials:'same-origin'});const body=await response.json().catch(()=>({error:'初始化请求失败，请刷新后重试。'}));if(!response.ok){show(body.error||'初始化失败，请刷新后重试。');return}submit.textContent='正在启动…';window.setTimeout(()=>window.location.reload(),1500)}catch{show('无法连接初始化服务，请刷新后重试。')}finally{if(submit.textContent!=='正在启动…')submit.disabled=false}})})()</script></body></html>`
 }
 
 async function ensureSetupCode() {
@@ -124,21 +155,81 @@ function readForm(req) {
 
 function createAuthUser(username, password) {
   return new Promise((resolve, reject) => {
+    let stderr = ''
     const child = spawn(process.execPath, [authCli, 'user', 'add', username, '--password-stdin'], {
       env: { ...process.env, DSH_HOME: dshHome },
-      stdio: ['pipe', 'ignore', 'ignore'],
+      stdio: ['pipe', 'ignore', 'pipe'],
     })
     child.once('error', reject)
-    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error('auth user creation failed')))
+    child.stderr.on('data', (chunk) => {
+      if (stderr.length < 2048) stderr += chunk.toString('utf8').slice(0, 2048 - stderr.length)
+    })
+    child.once('exit', (code) => resolve({
+      created: code === 0,
+      diagnostic: diagnostic(stderr),
+    }))
     child.stdin.end(`${password}\n`)
   })
+}
+
+async function verifyExistingAuthUserPassword(username, password) {
+  const usersFile = join(dshHome, 'auth', 'users.yaml')
+  try {
+    const [{ loadUsersFile }, { verifyPassword }] = await Promise.all([
+      import(pathToFileURL(join(authGatePackageRoot, 'lib', 'shared', 'users-file.js')).href),
+      import(pathToFileURL(join(authGatePackageRoot, 'lib', 'features', 'password', 'password.js')).href),
+    ])
+    const { snapshot } = await loadUsersFile(usersFile)
+    const user = snapshot.users.get(username)
+    return user !== undefined && await verifyPassword(password, user.passwordHash)
+  } catch (error) {
+    setupLog('setup_existing_admin_verify_failed', { username, ...errorDetails(error) })
+    throw new Error('无法读取现有管理员账户。请检查 /data 持久化目录权限后重试。')
+  }
+}
+
+async function createOrVerifyAuthUser(username, password) {
+  let result
+  try {
+    result = await createAuthUser(username, password)
+  } catch (error) {
+    setupLog('setup_auth_user_failed', { username, ...errorDetails(error) })
+    throw new Error('无法启动管理员创建程序。请查看容器日志中的 setup_auth_user_failed。')
+  }
+  if (result.created) {
+    setupLog('setup_auth_user_created', { username })
+    return
+  }
+
+  if (result.diagnostic === `user ${username} already exists`) {
+    if (await verifyExistingAuthUserPassword(username, password)) {
+      setupLog('setup_existing_admin_verified', { username })
+      return
+    }
+    setupLog('setup_existing_admin_password_mismatch', { username })
+    throw new Error('管理员用户名已存在，但密码不匹配。请使用此前设置的密码继续初始化。')
+  }
+
+  setupLog('setup_auth_user_failed', { username, reason: result.diagnostic || 'Auth Gate exited without an error message' })
+  if (/(EACCES|permission|cannot (stat|read|write)|insecure permissions)/i.test(result.diagnostic)) {
+    throw new Error('管理员账户数据不可写。请检查 /data 持久化目录权限。')
+  }
+  if (/scrypt/i.test(result.diagnostic)) {
+    throw new Error('容器资源不足，无法生成密码哈希。请提高容器内存后重试。')
+  }
+  throw new Error('创建管理员失败。请查看容器日志中的 setup_auth_user_failed。')
 }
 
 async function writeRuntimeConfig(trustedHost) {
   await mkdir(dirname(configPath), { recursive: true, mode: 0o700 })
   const temporary = `${configPath}.${process.pid}.tmp`
-  await writeFile(temporary, `${JSON.stringify({ schemaVersion: 1, trustedHost, configuredAt: new Date().toISOString() })}\n`, { mode: 0o600, flag: 'wx' })
-  await rename(temporary, configPath)
+  try {
+    await writeFile(temporary, `${JSON.stringify({ schemaVersion: 1, trustedHost, configuredAt: new Date().toISOString() })}\n`, { mode: 0o600, flag: 'wx' })
+    await rename(temporary, configPath)
+  } catch (error) {
+    await unlink(temporary).catch(() => {})
+    throw error
+  }
 }
 
 let setupCode = ''
@@ -163,11 +254,15 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && (path === '/' || path === '/setup')) return html(res, 200, page({ authority: req.headers.host ?? '' }))
 
   if (req.method === 'POST' && path === '/setup') {
-    if (completing) return html(res, 409, page({ authority: req.headers.host ?? '', error: '初始化正在进行，请稍后刷新。' }))
+    if (completing) {
+      setupLog('setup_request_rejected', { reason: 'already_completing' })
+      return setupError(req, res, 409, { authority: req.headers.host ?? '', error: '初始化正在进行，请稍后刷新。' })
+    }
     completing = true
+    let form = {}
     try {
       if (!String(req.headers['content-type'] ?? '').startsWith('application/x-www-form-urlencoded')) throw new Error('请求格式不正确。')
-      const form = await readForm(req)
+      form = await readForm(req)
       const trustedHost = form.trustedHost ?? ''
       const username = form.username ?? ''
       const password = form.password ?? ''
@@ -176,14 +271,22 @@ const server = createServer(async (req, res) => {
       if (!validUsername(username)) throw new Error('管理员用户名格式无效。')
       if (password.length < 12 || password !== form.passwordConfirm) throw new Error('密码至少需要 12 位，且两次输入必须一致。')
 
-      await createAuthUser(username, password)
-      await writeRuntimeConfig(trustedHost)
+      setupLog('setup_request_validated', { trustedHost, username })
+      await createOrVerifyAuthUser(username, password)
+      try {
+        await writeRuntimeConfig(trustedHost)
+      } catch (error) {
+        setupLog('setup_runtime_config_write_failed', { trustedHost, username, ...errorDetails(error) })
+        throw new Error('公开域名配置无法写入持久化数据。请检查 /data 挂载权限。')
+      }
       if (requireSetupCode) await unlink(setupCodePath)
-      html(res, 202, '<!doctype html><meta charset="utf-8"><title>初始化完成</title><p>初始化完成，DSH 正在启动。请在几秒后刷新当前页面。</p>')
-      process.stdout.write(`${JSON.stringify({ event: 'initial_setup_completed' })}\n`)
+      setupComplete(req, res)
+      process.stdout.write(`${JSON.stringify({ event: 'initial_setup_completed', trustedHost, username })}\n`)
     } catch (error) {
       completing = false
-      html(res, 400, page({ authority: req.headers.host ?? '', error: error instanceof Error ? error.message : '初始化失败。' }))
+      const message = error instanceof Error ? error.message : '初始化失败。'
+      setupLog('setup_request_failed', { trustedHost: form.trustedHost ?? '', username: form.username ?? '', ...errorDetails(error) })
+      setupError(req, res, 400, { authority: form.trustedHost ?? req.headers.host ?? '', username: form.username ?? '', error: message })
     }
     return
   }

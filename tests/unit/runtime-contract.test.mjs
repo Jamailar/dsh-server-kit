@@ -56,6 +56,26 @@ async function createFakeAuthCli(stateDir) {
   return authCli
 }
 
+async function createExistingUserAuthGate(stateDir) {
+  const packageRoot = join(stateDir, 'existing-auth-gate')
+  const authCli = join(packageRoot, 'lib', 'cli.js')
+  await mkdir(join(packageRoot, 'lib', 'shared'), { recursive: true })
+  await mkdir(join(packageRoot, 'lib', 'features', 'password'), { recursive: true })
+  await writeFile(join(packageRoot, 'package.json'), JSON.stringify({ type: 'module' }))
+  await writeFile(authCli, "process.stderr.write(`user ${process.argv[4]} already exists\\n`)\nprocess.exitCode = 1\n")
+  await writeFile(join(packageRoot, 'lib', 'shared', 'users-file.js'), `
+    export async function loadUsersFile() {
+      return { snapshot: { users: new Map([['admin', { passwordHash: 'fixture-hash' }]]) } }
+    }
+  `)
+  await writeFile(join(packageRoot, 'lib', 'features', 'password', 'password.js'), `
+    export async function verifyPassword(password, passwordHash) {
+      return password === 'a-long-test-password' && passwordHash === 'fixture-hash'
+    }
+  `)
+  return { authCli, packageRoot }
+}
+
 test('auth readiness probe requires a mounted public status endpoint and a denied protected request', async () => {
   const upstream = createServer((req, res) => {
     if (req.url === '/auth/status') {
@@ -182,11 +202,16 @@ test('default first-open setup rejects an email username before Auth Gate is cal
 
   const setupPage = await waitForHttp(port, '/setup', 200)
   const setupHtml = await setupPage.text()
-  assert.doesNotMatch(setupHtml, /一次性初始化码/)
+  assert.doesNotMatch(setupHtml, /name="setupCode"/)
   assert.match(setupHtml, /不支持邮箱/)
   assert.match(setupHtml, /DeepSeek Harness/)
   assert.match(setupHtml, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg">/)
+  assert.match(setupHtml, /id="setup-form"/)
+  assert.match(setupHtml, /<label for="username">管理员用户名<\/label>/)
+  assert.match(setupHtml, /field-shake/)
+  assert.match(setupHtml, /new URLSearchParams\(new FormData\(form\)\)/)
   assert.match(setupPage.headers.get('content-security-policy') ?? '', /img-src 'self'/)
+  assert.match(setupPage.headers.get('content-security-policy') ?? '', /script-src 'unsafe-inline'/)
   const favicon = await fetch(`http://127.0.0.1:${port}/favicon.svg`)
   assert.equal(favicon.status, 200)
   assert.equal(favicon.headers.get('content-type'), 'image/svg+xml')
@@ -207,6 +232,75 @@ test('default first-open setup rejects an email username before Auth Gate is cal
   assert.equal(response.status, 400)
   assert.match(await response.text(), /管理员用户名格式无效/)
   await assert.rejects(readFile(configPath, 'utf8'), { code: 'ENOENT' })
+
+  const jsonResponse = await fetch(`http://127.0.0.1:${port}/setup`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  assert.equal(jsonResponse.status, 400)
+  assert.deepEqual(await jsonResponse.json(), { error: '管理员用户名格式无效。' })
+})
+
+test('setup safely resumes after an existing administrator was created before runtime configuration was saved', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-resume-setup-'))
+  const dshHome = join(stateDir, 'dsh')
+  const configPath = join(stateDir, 'runtime-config.json')
+  const { authCli, packageRoot } = await createExistingUserAuthGate(stateDir)
+  const port = await availablePort()
+  let stderr = ''
+
+  await mkdir(dshHome, { recursive: true })
+  const child = spawn(process.execPath, ['src/setup-server.mjs'], {
+    cwd: new URL('.', projectRoot),
+    env: {
+      ...process.env,
+      SETUP_HOST: '127.0.0.1',
+      SETUP_PORT: String(port),
+      DSH_HOME: dshHome,
+      RUNTIME_CONFIG_PATH: configPath,
+      AUTH_GATE_CLI: authCli,
+      AUTH_GATE_PACKAGE_ROOT: packageRoot,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+  t.after(() => child.kill('SIGTERM'))
+
+  await waitForHttp(port, '/setup', 200)
+  const wrongPassword = new URLSearchParams({
+    trustedHost: 'dsh.example.com',
+    username: 'admin',
+    password: 'a-different-password',
+    passwordConfirm: 'a-different-password',
+  })
+  const denied = await fetch(`http://127.0.0.1:${port}/setup`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+    body: wrongPassword,
+  })
+  assert.equal(denied.status, 400)
+  assert.deepEqual(await denied.json(), { error: '管理员用户名已存在，但密码不匹配。请使用此前设置的密码继续初始化。' })
+  await assert.rejects(readFile(configPath, 'utf8'), { code: 'ENOENT' })
+
+  const validPassword = new URLSearchParams({
+    trustedHost: 'dsh.example.com',
+    username: 'admin',
+    password: 'a-long-test-password',
+    passwordConfirm: 'a-long-test-password',
+  })
+  const response = await fetch(`http://127.0.0.1:${port}/setup`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+    body: validPassword,
+  })
+  assert.equal(response.status, 202)
+  assert.deepEqual(await response.json(), { status: 'initializing' })
+  assert.equal(JSON.parse(await readFile(configPath, 'utf8')).trustedHost, 'dsh.example.com')
+  assert.match(stderr, /"event":"setup_existing_admin_password_mismatch","username":"admin"/)
+  assert.match(stderr, /"event":"setup_existing_admin_verified","username":"admin"/)
+  assert.doesNotMatch(stderr, /a-long-test-password/)
+  assert.doesNotMatch(stderr, /a-different-password/)
 })
 
 test('Auth Gate branding patch adds the DeepSeek title and mark without touching its authentication flow', async () => {
