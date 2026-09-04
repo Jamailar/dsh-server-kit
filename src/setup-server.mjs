@@ -16,12 +16,13 @@ const requireSetupCode = setupProtection === 'code'
 if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) throw new Error('invalid SETUP_PORT')
 if (!['open', 'code'].includes(setupProtection)) throw new Error('invalid DSH_SETUP_PROTECTION')
 
+const favicon = await readFile(new URL('./assets/favicon.svg', import.meta.url), 'utf8')
 let completing = false
 
 function html(res, statusCode, body) {
   res.writeHead(statusCode, {
     'cache-control': 'no-store',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     'content-type': 'text/html; charset=utf-8',
     'referrer-policy': 'no-referrer',
     'x-content-type-options': 'nosniff',
@@ -35,6 +36,16 @@ function json(res, statusCode, value) {
     'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(body),
+  })
+  res.end(body)
+}
+
+function svg(res, body) {
+  res.writeHead(200, {
+    'cache-control': 'no-store',
+    'content-type': 'image/svg+xml',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
   })
   res.end(body)
 }
@@ -66,10 +77,10 @@ function page({ authority = '', error = '' } = {}) {
     ? '输入容器日志中的一次性初始化码，创建管理员并确认公开访问域名。'
     : '创建管理员并确认公开访问域名。'
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>初始化 DSH Server Kit</title><style>
-body{margin:0;background:#111827;color:#f9fafb;font:16px/1.5 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}.card{width:min(440px,calc(100% - 32px));padding:32px;border:1px solid #374151;border-radius:14px;background:#1f2937}h1{margin:0 0 8px;font-size:24px}p{color:#d1d5db}.hint{margin:6px 0 0;color:#9ca3af;font-size:13px}label{display:block;margin:16px 0 6px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #4b5563;border-radius:8px;background:#111827;color:#fff}button{margin-top:24px;width:100%;padding:11px;border:0;border-radius:8px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer}.error{padding:10px;border-radius:8px;background:#7f1d1d;color:#fecaca}</style></head>
-<body><main class="card"><h1>初始化 DSH Server Kit</h1><p>${protectionHint}</p>${message}
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>初始化 — DeepSeek Harness</title><style>
+:root{color-scheme:light dark;--bg:#f7f8fa;--surface:#fff;--text:#1f2329;--secondary:#6b7280;--border:rgb(0 0 0 / 10%);--input:#fff;--primary:#4176e6;--primary-hover:#567ffe;--ring:rgb(65 118 230 / 18%);--error:#b42318;--error-bg:#fff5f4;--error-border:#fecdc9}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px}.card{width:min(440px,100%);padding:38px 32px 32px;border:.5px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 12px 32px rgb(15 23 42 / 7%)}.brand{display:flex;align-items:center;justify-content:center;gap:7px;margin:0 0 24px;font-size:20px;font-weight:650;letter-spacing:-.025em}.brand img{display:block;width:32px;height:32px}.brand-suffix{color:var(--secondary);font-weight:500}h1{margin:0 0 6px;font-size:24px;font-weight:600;letter-spacing:-.02em}p{margin:0;color:var(--secondary)}.hint{margin:6px 0 0;font-size:13px}label{display:block;margin:16px 0 6px;font-size:14px;font-weight:500}input{width:100%;height:44px;padding:0 13px;border:.5px solid var(--border);border-radius:10px;background:var(--input);color:var(--text);font:inherit;outline:none;transition:border-color .15s,box-shadow .15s}input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--ring)}button{margin-top:24px;width:100%;height:44px;padding:0;border:0;border-radius:10px;background:var(--primary);color:#fff;font:600 15px/1 inherit;cursor:pointer;transition:background .15s,transform .05s}button:hover{background:var(--primary-hover)}button:active{transform:scale(.99)}button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ring)}.error{margin:20px 0 0;padding:10px 12px;border:1px solid var(--error-border);border-radius:10px;background:var(--error-bg);color:var(--error);font-size:14px}@media (prefers-color-scheme:dark){:root{--bg:#17171a;--surface:#202024;--text:#f4f4f5;--secondary:#a1a1aa;--border:rgb(255 255 255 / 12%);--input:#27272c;--primary:#567ffe;--primary-hover:#6b90ff;--ring:rgb(103 158 254 / 24%);--error:#fecaca;--error-bg:rgb(127 29 29 / 35%);--error-border:rgb(248 113 113 / 36%)}.card{box-shadow:0 18px 38px rgb(0 0 0 / 24%)}}@media (prefers-reduced-motion:reduce){input,button{transition:none}button:active{transform:none}}@media (max-width:420px){body{padding:16px}.card{padding:32px 24px 26px}}</style></head>
+<body><main class="card"><div class="brand" aria-label="DeepSeek Harness"><img src="/favicon.svg" width="32" height="32" alt=""><span>DeepSeek</span><span class="brand-suffix">Harness</span></div><h1>初始化</h1><p>${protectionHint}</p>${message}
 <form method="post" action="/setup"><label>公开域名</label><input name="trustedHost" required value="${escapeHtml(authority)}" autocomplete="url" spellcheck="false"><label>管理员用户名</label><input name="username" required minlength="1" maxlength="64" autocomplete="username" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9_.-]*" title="只能使用字母、数字、点、下划线和连字符"><p class="hint">以字母或数字开头；只能使用字母、数字、点、下划线和连字符，不支持邮箱。</p><label>管理员密码</label><input name="password" type="password" required minlength="12" autocomplete="new-password"><label>确认密码</label><input name="passwordConfirm" type="password" required minlength="12" autocomplete="new-password">${setupCodeInput}<button type="submit">完成初始化</button></form></main></body></html>`
 }
 
@@ -148,6 +159,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url ?? '/', 'http://setup.internal').pathname
   if (req.method === 'GET' && path === '/healthz') return json(res, 200, { status: 'setup_required' })
   if (req.method === 'GET' && path === '/readyz') return json(res, 503, { status: 'setup_required' })
+  if (req.method === 'GET' && path === '/favicon.svg') return svg(res, favicon)
   if (req.method === 'GET' && (path === '/' || path === '/setup')) return html(res, 200, page({ authority: req.headers.host ?? '' }))
 
   if (req.method === 'POST' && path === '/setup') {

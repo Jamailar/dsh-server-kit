@@ -84,6 +84,10 @@ copy_seed_profile() {
   mv "$seed_tmp" "$profile_dir"
 }
 
+brand_auth_gate_login() {
+  run_as_dsh node "$APP_ROOT/scripts/brand-auth-gate-login.mjs" --profile "$DSH_HOME/profiles/web"
+}
+
 seed_admin_if_needed() {
   users_file="$DSH_HOME/auth/users.yaml"
   [ -s "$users_file" ] && return 0
@@ -198,6 +202,7 @@ copy_seed_profile
 if [ "$(id -u)" -eq 0 ]; then
   chown -R dsh:dsh "$DSH_HOME/profiles" "$DSH_HOME/auth" 2>/dev/null || chown -R dsh:dsh "$DSH_HOME/profiles"
 fi
+brand_auth_gate_login
 
 DSH_SERVER_RELEASE=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).release.version)' "$APP_ROOT/config/release-manifest.json")
 export DSH_SERVER_RELEASE

@@ -181,8 +181,16 @@ test('default first-open setup rejects an email username before Auth Gate is cal
   t.after(() => child.kill('SIGTERM'))
 
   const setupPage = await waitForHttp(port, '/setup', 200)
-  assert.doesNotMatch(await setupPage.text(), /一次性初始化码/)
-  assert.match(await (await fetch(`http://127.0.0.1:${port}/setup`)).text(), /不支持邮箱/)
+  const setupHtml = await setupPage.text()
+  assert.doesNotMatch(setupHtml, /一次性初始化码/)
+  assert.match(setupHtml, /不支持邮箱/)
+  assert.match(setupHtml, /DeepSeek Harness/)
+  assert.match(setupHtml, /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg">/)
+  assert.match(setupPage.headers.get('content-security-policy') ?? '', /img-src 'self'/)
+  const favicon = await fetch(`http://127.0.0.1:${port}/favicon.svg`)
+  assert.equal(favicon.status, 200)
+  assert.equal(favicon.headers.get('content-type'), 'image/svg+xml')
+  assert.match(await favicon.text(), /prefers-color-scheme: dark/)
   await assert.rejects(readFile(setupCodePath, 'utf8'), { code: 'ENOENT' })
 
   const body = new URLSearchParams({
@@ -201,6 +209,48 @@ test('default first-open setup rejects an email username before Auth Gate is cal
   await assert.rejects(readFile(configPath, 'utf8'), { code: 'ENOENT' })
 })
 
+test('Auth Gate branding patch adds the DeepSeek title and mark without touching its authentication flow', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-branding-'))
+  const packageDir = join(stateDir, 'node_modules', 'dsh-auth-gate')
+  const loginPage = join(packageDir, 'lib', 'shared', 'login-page.js')
+  await mkdir(join(packageDir, 'lib', 'shared'), { recursive: true })
+  await writeFile(join(packageDir, 'package.json'), JSON.stringify({ name: 'dsh-auth-gate', version: '0.12.0' }))
+  await writeFile(loginPage, [
+    'const CARD_STYLE = `old`;',
+    "const SHIELD_SVG = '<svg></svg>';",
+    'const page = `<!doctype html>',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<title>${options.title}</title>',
+    '<style>${CARD_STYLE}</style>',
+    '<div class="brand">${SHIELD_SVG}</div>`;',
+    '<form method="post" action="/auth/login"></form>',
+    '//# sourceMappingURL=login-page.js.map',
+    '',
+  ].join('\n'))
+
+  async function applyBranding() {
+    const child = spawn(process.execPath, ['scripts/brand-auth-gate-login.mjs', '--profile', stateDir], {
+      cwd: new URL('.', projectRoot),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const completed = new Promise((resolve, reject) => child.once('exit', resolve).once('error', reject))
+    let stderr = ''
+    for await (const chunk of child.stderr) stderr += chunk
+    const exitCode = await completed
+    assert.equal(exitCode, 0, stderr)
+  }
+
+  await applyBranding()
+  const branded = await readFile(loginPage, 'utf8')
+  assert.match(branded, /dsh-server-kit-deepseek-brand-v1/)
+  assert.match(branded, /DeepSeek Harness/)
+  assert.match(branded, /src="\/favicon\.svg"/)
+  assert.match(branded, /<form method="post" action="\/auth\/login"><\/form>/)
+  assert.doesNotMatch(branded, /sourceMappingURL/)
+  await applyBranding()
+  assert.equal(await readFile(loginPage, 'utf8'), branded)
+})
+
 test('release manifest, seed locks, and Caddy trust boundary are internally consistent', async () => {
   const manifest = JSON.parse(await readFile(new URL('config/release-manifest.json', projectRoot), 'utf8'))
   assert.equal(manifest.runtime.dsh.version, '0.1.2-rc.1')
@@ -213,6 +263,7 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   assert.match(caddyfile, /header_up Host \{http\.request\.host\}/)
   assert.match(caddyfile, /header_up -X-Dsh-Proxy/)
   assert.doesNotMatch(caddyfile, /header_up Host 127\.0\.0\.1/)
+  assert.match(caddyfile, /handle \/favicon\.svg/)
 
   const setupServer = await readFile(new URL('src/setup-server.mjs', projectRoot), 'utf8')
   assert.match(setupServer, /timingSafeEqual/)

@@ -18,8 +18,11 @@ RUN pnpm install --frozen-lockfile --prod
 COPY seed-profiles /opt/dsh-seed
 COPY config /app/config
 COPY scripts/build-seed-profile.mjs /app/scripts/build-seed-profile.mjs
+COPY scripts/brand-auth-gate-login.mjs /app/scripts/brand-auth-gate-login.mjs
 RUN pnpm --dir /opt/dsh-seed/base install --frozen-lockfile --prod \
  && pnpm --dir /opt/dsh-seed/workbench install --frozen-lockfile --prod \
+ && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/base \
+ && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/workbench \
  && node /app/scripts/build-seed-profile.mjs --preset base --profile /opt/dsh-seed/base \
  && node /app/scripts/build-seed-profile.mjs --preset workbench --profile /opt/dsh-seed/workbench
 

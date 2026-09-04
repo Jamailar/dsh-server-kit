@@ -11,6 +11,14 @@
   @invalid_host not host {$DSH_TRUSTED_HOST}
   respond @invalid_host 421
 
+  # The same official DeepSeek Harness mark is used by setup and the Auth Gate
+  # login page. Serve it before DSH's authenticated catch-all handler.
+  handle /favicon.svg {
+    root * /app/src/assets
+    header Cache-Control "no-store"
+    file_server
+  }
+
   # These endpoints intentionally bypass DSH authentication. They expose only
   # readiness and the locked release tuple, never DSH configuration or logs.
   @status path /healthz /readyz /versionz
