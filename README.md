@@ -19,7 +19,7 @@
 ## 信任边界
 
 ```text
-HTTPS / Coolify / Traefik
+HTTPS / reverse proxy
         │ :8080
         ▼
       Caddy ── /healthz, /readyz, /versionz → status :9000
@@ -33,32 +33,80 @@ HTTPS / Coolify / Traefik
 
 Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。这个 authority 在首次 Web 初始化时持久化，之后由启动器自动提供给 DSH 与 Caddy，无需持续配置环境变量。
 
-端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。因此登录限流应同时在 Coolify/Traefik/Cloudflare 边缘配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
+端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。登录限流应在外层反向代理或边缘网络配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
 
-## 部署
+## 使用 Dockerfile 部署
 
-1. 创建一个持久卷并挂载到 `/data`。认证、运行配置和工作区分别位于 `/data/dsh`、`/data/dsh-server`、`/data/workspace`。
-2. 仅发布容器 `8080`，在 Coolify 配置 HTTPS 域名。
-3. 首次启动后，打开该 HTTPS 域名的 `/setup`，输入域名、管理员用户名和密码。用户名须以字母或数字开头，只能含字母、数字、`.`、`_`、`-`，不能使用邮箱。
-4. 向导会把域名与密码哈希用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
+本项目的推荐方式是直接构建仓库根目录的 `Dockerfile`。运行时不需要管理员、密码或域名环境变量；首次浏览器初始化会把非敏感域名配置和密码哈希状态写入持久化数据目录。
 
-如果已按旧配置创建过三个独立 Volume，升级前先创建 `/data` 的快照，并将旧的 `dsh-home`、`dsh-server`、`dsh-workspace` 内容分别复制到新 Volume 的 `dsh`、`dsh-server`、`workspace` 子目录。不要把空的 `/data` 挂到已有实例上，否则它会被当作新实例初始化。
-
-本地构建命令：
+### 1. 构建镜像并创建唯一持久卷
 
 ```sh
-docker compose up --build -d
-# 完成 /setup 后：
-curl -H 'Host: localhost:8080' http://127.0.0.1:8080/readyz
+git clone https://github.com/Jamailar/dsh-server-kit.git
+cd dsh-server-kit
+docker build --tag dsh-server-kit:latest .
+docker volume create dsh-data
 ```
 
-直接 HTTP 只适合检查健康状态，不能用于登录：认证 Cookie 强制 `Secure`。生产必须在 HTTPS 后面运行。
+`dsh-data` 是唯一必须保留的 Docker Volume。不要在升级或清理容器时执行 `docker volume rm dsh-data`。
 
-首次启动不需要环境变量，默认初始化页面也不显示一次性码。Web 向导通过 Auth Gate 自己的 CLI、使用 stdin 创建密码哈希用户记录；密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的密码哈希记录和非敏感运行配置。
+若你更希望直接管理服务器上的目录，可创建例如 `/srv/dsh-server-kit/data`，并在下面的启动命令中将 `--volume dsh-data:/data` 替换为 `--volume /srv/dsh-server-kit/data:/data`。两种方式二选一，容器内挂载路径始终是 `/data`。
 
-`DSH_SETUP_PROTECTION=code` 会重新启用保留在镜像内的一次性初始化码机制：代码只出现在首次容器日志，完成后删除。默认 `open` 模式应只在首次访问受控（例如先不公开 DNS 或限制平台访问）的部署中使用；如果域名已公开，任何第一个访问 `/setup` 的人都可创建管理员，生产部署应改用 `code` 模式。
+### 2. 启动容器
 
-浏览器不能安全、持久地改写 Coolify 的环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
+下面的命令把服务仅绑定到本机回环地址；由同一台服务器上的 HTTPS 反向代理转发至 `127.0.0.1:8080`。
+
+```sh
+docker run --detach \
+  --name dsh-server-kit \
+  --restart unless-stopped \
+  --publish 127.0.0.1:8080:8080 \
+  --volume dsh-data:/data \
+  dsh-server-kit:latest
+```
+
+反向代理必须终止 HTTPS、保留浏览器请求的原始 `Host`，并将请求转发给 `http://127.0.0.1:8080`。不要发布 DSH 内部的 `3080` 或状态端口 `9000`。直接 HTTP 只能用于健康检查，不能登录：认证 Cookie 强制 `Secure`。
+
+### 3. 完成首次初始化
+
+访问 `https://你的域名/setup`，填入准确的公开域名、管理员用户名和密码。公开域名只能是 `dsh.example.com` 这类 authority，不能带 `https://` 或路径。
+
+管理员用户名须以字母或数字开头，只能包含字母、数字、`.`、`_`、`-`，最长 64 个字符；不支持邮箱。初始化成功后，容器自动启动 DSH；等待就绪检查返回 `200` 后登录：
+
+```sh
+curl --fail \
+  -H 'Host: dsh.example.com' \
+  http://127.0.0.1:8080/readyz
+```
+
+默认初始化模式不需要环境变量，也不显示一次性码。它仅适用于你能控制第一个 `/setup` 访问者的情形。若域名已经公开，在启动命令中额外加上 `--env DSH_SETUP_PROTECTION=code`；然后从 `docker logs dsh-server-kit` 取得一次性码并填入页面。初始化完成后该码会删除。
+
+### 4. 持久化数据说明
+
+唯一的 Volume 挂载到容器 `/data`，内部目录如下：
+
+| 路径 | 持久化内容 |
+| --- | --- |
+| `/data/dsh` | DSH Profile、管理员密码哈希、会话、模型与插件配置。 |
+| `/data/dsh-server` | 公开域名运行配置、版本与升级状态。 |
+| `/data/workspace` | DSH 读写的项目与工作文件。 |
+
+备份、迁移和回滚时以整个 `dsh-data` 为单位处理，并使用加密存储；其中可能包含模型凭据与项目文件。若从旧的三 Volume 版本迁移，先做快照，再将旧 `dsh-home`、`dsh-server`、`dsh-workspace` 的内容分别复制到新 Volume 的 `dsh`、`dsh-server`、`workspace` 子目录。不要给已有实例换上空的 `/data` Volume。
+
+### 5. 升级镜像
+
+先备份 `dsh-data`，构建新镜像，再仅替换容器并继续挂载同一个 Volume：
+
+```sh
+docker build --tag dsh-server-kit:next .
+docker stop dsh-server-kit
+docker rm dsh-server-kit
+# 使用上面的 docker run 命令重新启动；将镜像名改为 dsh-server-kit:next，Volume 仍为 dsh-data:/data。
+```
+
+启动器会在不改写用户 Profile 的前提下检查版本组合；`/readyz` 未通过时，应切回上一个镜像标签并继续使用原 `dsh-data` Volume。
+
+浏览器不能安全、持久地改写部署环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
 
 ## 预置与边界
 
@@ -84,4 +132,4 @@ node --test tests/unit/*.test.mjs
 node tests/integration/contract.mjs
 ```
 
-GitHub Actions 在 Node 24 下执行上述检查，并构建真实容器，确认 `readyz`、匿名 `401` 与 Auth Gate 状态端点。完整架构、组件准入和 Coolify 操作见 [执行计划](docs/EXECUTION_PLAN.md)。
+GitHub Actions 在 Node 24 下执行上述检查，并构建真实容器，确认 `readyz`、匿名 `401` 与 Auth Gate 状态端点。完整架构、组件准入和发布准则见 [执行计划](docs/EXECUTION_PLAN.md)。
