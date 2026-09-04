@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "version": "0.1.0",
+    "releaseDate": "2026-09-04"
+  },
+  "runtime": {
+    "node": {
+      "image": "node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8",
+      "version": "24.14.0"
+    },
+    "pnpm": "11.7.0",
+    "dsh": {
+      "name": "@deepseek-ai/dsh",
+      "version": "0.1.2-rc.1",
+      "integrity": "sha512-RPq48TzxvwpdT9/7W1tbhZDBMmeK+bxDrX9cqQC27Wx/LqtgJF8PSa3b3xriU8oxtvhwYmk21w2cej3uMQrnVA=="
+    },
+    "authGate": {
+      "name": "dsh-auth-gate",
+      "version": "0.12.0",
+      "integrity": "sha512-WGbjV1Wxy0mr2A4jcnAHaNuULjqU7GIQhYySvB1cEX70+LpxGNNgIjMfYyfzcZiVbkaMS6MwmhsRG8jmoQ9NTQ=="
+    },
+    "betterSidebar": {
+      "name": "dsh-better-sidebar",
+      "version": "0.18.0",
+      "integrity": "sha512-6sGUIpgrFLXikACKBXLSiyngULceZCIr5M4bLw2IdCJ3KWHcbNsJJl+TLHJw0lM9voRw0etbr5fC16VQ9YvshQ=="
+    }
+  },
+  "container": {
+    "caddy": {
+      "image": "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d",
+      "version": "2.10.2"
+    },
+    "tini": "0.19.0"
+  },
+  "presets": {
+    "base": {
+      "profile": "web",
+      "packages": {
+        "dsh-auth-gate": "0.12.0"
+      },
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-auth-gate"
+      ]
+    },
+    "workbench": {
+      "profile": "web",
+      "packages": {
+        "dsh-auth-gate": "0.12.0",
+        "dsh-better-sidebar": "0.18.0"
+      },
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-auth-gate",
+        "dsh-better-sidebar"
+      ]
+    }
+  }
+}

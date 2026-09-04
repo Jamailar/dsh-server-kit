@@ -1,0 +1,19 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "dsh-auth-gate": "0.12.0",
+    "dsh-better-sidebar": "0.18.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-auth-gate",
+        "dsh-better-sidebar"
+      ],
+      "patchReload": "live"
+    }
+  }
+}
