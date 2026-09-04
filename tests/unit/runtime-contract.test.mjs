@@ -156,7 +156,7 @@ test('code-protected first-open setup persists only public runtime configuration
   await assert.rejects(unlink(setupCodePath), { code: 'ENOENT' })
 })
 
-test('default first-open setup accepts an email administrator and does not expose a setup code', async (t) => {
+test('default first-open setup rejects an email username before Auth Gate is called', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-open-setup-'))
   const dshHome = join(stateDir, 'dsh')
   const configPath = join(stateDir, 'runtime-config.json')
@@ -182,6 +182,7 @@ test('default first-open setup accepts an email administrator and does not expos
 
   const setupPage = await waitForHttp(port, '/setup', 200)
   assert.doesNotMatch(await setupPage.text(), /一次性初始化码/)
+  assert.match(await (await fetch(`http://127.0.0.1:${port}/setup`)).text(), /不支持邮箱/)
   await assert.rejects(readFile(setupCodePath, 'utf8'), { code: 'ENOENT' })
 
   const body = new URLSearchParams({
@@ -195,8 +196,9 @@ test('default first-open setup accepts an email administrator and does not expos
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   })
-  assert.equal(response.status, 202)
-  assert.match(await readFile(join(dshHome, 'auth', 'users.yaml'), 'utf8'), /user: admin@example\.com/)
+  assert.equal(response.status, 400)
+  assert.match(await response.text(), /管理员用户名格式无效/)
+  await assert.rejects(readFile(configPath, 'utf8'), { code: 'ENOENT' })
 })
 
 test('release manifest, seed locks, and Caddy trust boundary are internally consistent', async () => {

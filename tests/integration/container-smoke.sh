@@ -30,7 +30,7 @@ fi
 curl --silent --show-error --fail \
   -H "Host: localhost:${host_port}" \
   --data-urlencode "trustedHost=localhost:${host_port}" \
-  --data-urlencode 'username=admin@example.com' \
+  --data-urlencode 'username=admin' \
   --data-urlencode 'password=ci-only-not-a-production-secret' \
   --data-urlencode 'passwordConfirm=ci-only-not-a-production-secret' \
   --output /dev/null \

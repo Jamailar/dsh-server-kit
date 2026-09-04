@@ -39,8 +39,8 @@ Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。�
 
 1. 创建一个持久卷并挂载到 `/data`。认证、运行配置和工作区分别位于 `/data/dsh`、`/data/dsh-server`、`/data/workspace`。
 2. 仅发布容器 `8080`，在 Coolify 配置 HTTPS 域名。
-3. 首次启动后，打开该 HTTPS 域名的 `/setup`，输入域名、管理员用户名或邮箱和密码。
-4. 向导会把域名与 bcrypt 用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
+3. 首次启动后，打开该 HTTPS 域名的 `/setup`，输入域名、管理员用户名和密码。用户名须以字母或数字开头，只能含字母、数字、`.`、`_`、`-`，不能使用邮箱。
+4. 向导会把域名与密码哈希用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
 
 如果已按旧配置创建过三个独立 Volume，升级前先创建 `/data` 的快照，并将旧的 `dsh-home`、`dsh-server`、`dsh-workspace` 内容分别复制到新 Volume 的 `dsh`、`dsh-server`、`workspace` 子目录。不要把空的 `/data` 挂到已有实例上，否则它会被当作新实例初始化。
 
@@ -54,7 +54,7 @@ curl -H 'Host: localhost:8080' http://127.0.0.1:8080/readyz
 
 直接 HTTP 只适合检查健康状态，不能用于登录：认证 Cookie 强制 `Secure`。生产必须在 HTTPS 后面运行。
 
-首次启动不需要环境变量，默认初始化页面也不显示一次性码。Web 向导通过 Auth Gate 自己的 CLI、使用 stdin 创建 bcrypt 用户记录；密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的 bcrypt 记录和非敏感运行配置。
+首次启动不需要环境变量，默认初始化页面也不显示一次性码。Web 向导通过 Auth Gate 自己的 CLI、使用 stdin 创建密码哈希用户记录；密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的密码哈希记录和非敏感运行配置。
 
 `DSH_SETUP_PROTECTION=code` 会重新启用保留在镜像内的一次性初始化码机制：代码只出现在首次容器日志，完成后删除。默认 `open` 模式应只在首次访问受控（例如先不公开 DNS 或限制平台访问）的部署中使用；如果域名已公开，任何第一个访问 `/setup` 的人都可创建管理员，生产部署应改用 `code` 模式。
 

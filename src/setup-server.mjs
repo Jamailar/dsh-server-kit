@@ -54,9 +54,7 @@ function validateAuthority(value) {
 }
 
 function validUsername(value) {
-  const localUsername = /^[A-Za-z0-9][A-Za-z0-9_.-]{1,62}$/
-  const emailAddress = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/
-  return value.length <= 254 && (localUsername.test(value) || emailAddress.test(value))
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value)
 }
 
 function page({ authority = '', error = '' } = {}) {
@@ -70,9 +68,9 @@ function page({ authority = '', error = '' } = {}) {
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>初始化 DSH Server Kit</title><style>
-body{margin:0;background:#111827;color:#f9fafb;font:16px/1.5 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}.card{width:min(440px,calc(100% - 32px));padding:32px;border:1px solid #374151;border-radius:14px;background:#1f2937}h1{margin:0 0 8px;font-size:24px}p{color:#d1d5db}label{display:block;margin:16px 0 6px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #4b5563;border-radius:8px;background:#111827;color:#fff}button{margin-top:24px;width:100%;padding:11px;border:0;border-radius:8px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer}.error{padding:10px;border-radius:8px;background:#7f1d1d;color:#fecaca}</style></head>
+body{margin:0;background:#111827;color:#f9fafb;font:16px/1.5 system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}.card{width:min(440px,calc(100% - 32px));padding:32px;border:1px solid #374151;border-radius:14px;background:#1f2937}h1{margin:0 0 8px;font-size:24px}p{color:#d1d5db}.hint{margin:6px 0 0;color:#9ca3af;font-size:13px}label{display:block;margin:16px 0 6px}input{box-sizing:border-box;width:100%;padding:10px;border:1px solid #4b5563;border-radius:8px;background:#111827;color:#fff}button{margin-top:24px;width:100%;padding:11px;border:0;border-radius:8px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer}.error{padding:10px;border-radius:8px;background:#7f1d1d;color:#fecaca}</style></head>
 <body><main class="card"><h1>初始化 DSH Server Kit</h1><p>${protectionHint}</p>${message}
-<form method="post" action="/setup"><label>公开域名</label><input name="trustedHost" required value="${escapeHtml(authority)}" autocomplete="url" spellcheck="false"><label>管理员用户名或邮箱</label><input name="username" required minlength="2" maxlength="254" autocomplete="username" inputmode="email"><label>管理员密码</label><input name="password" type="password" required minlength="12" autocomplete="new-password"><label>确认密码</label><input name="passwordConfirm" type="password" required minlength="12" autocomplete="new-password">${setupCodeInput}<button type="submit">完成初始化</button></form></main></body></html>`
+<form method="post" action="/setup"><label>公开域名</label><input name="trustedHost" required value="${escapeHtml(authority)}" autocomplete="url" spellcheck="false"><label>管理员用户名</label><input name="username" required minlength="1" maxlength="64" autocomplete="username" spellcheck="false" pattern="[A-Za-z0-9][A-Za-z0-9_.-]*" title="只能使用字母、数字、点、下划线和连字符"><p class="hint">以字母或数字开头；只能使用字母、数字、点、下划线和连字符，不支持邮箱。</p><label>管理员密码</label><input name="password" type="password" required minlength="12" autocomplete="new-password"><label>确认密码</label><input name="passwordConfirm" type="password" required minlength="12" autocomplete="new-password">${setupCodeInput}<button type="submit">完成初始化</button></form></main></body></html>`
 }
 
 async function ensureSetupCode() {
