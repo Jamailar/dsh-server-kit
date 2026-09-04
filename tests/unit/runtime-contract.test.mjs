@@ -361,6 +361,8 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   assert.match(caddyfile, /header_up -X-Dsh-Proxy/)
   assert.doesNotMatch(caddyfile, /header_up Host 127\.0\.0\.1/)
   assert.match(caddyfile, /handle \/favicon\.svg/)
+  assert.match(caddyfile, /versions 1\.1/)
+  assert.doesNotMatch(caddyfile, /versions h1/)
 
   const setupServer = await readFile(new URL('src/setup-server.mjs', projectRoot), 'utf8')
   assert.match(setupServer, /timingSafeEqual/)
@@ -373,4 +375,5 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   const entrypoint = await readFile(new URL('docker/entrypoint.sh', projectRoot), 'utf8')
   assert.match(entrypoint, /repair_seed_profile_if_needed/)
   assert.match(entrypoint, /seed_profile_dependencies_repaired/)
+  assert.match(entrypoint, /--no-open/)
 })

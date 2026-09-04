@@ -248,6 +248,7 @@ cd "$WORKSPACE_ROOT"
 run_as_dsh "$RUNTIME_ROOT/node_modules/.bin/dsh" web \
   --host 127.0.0.1 \
   --port "$DSH_INTERNAL_PORT" \
+  --no-open \
   --trusted-host "$DSH_TRUSTED_HOST" &
 DSH_PID=$!
 

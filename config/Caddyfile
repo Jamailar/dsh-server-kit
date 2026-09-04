@@ -25,7 +25,7 @@
   handle @status {
     reverse_proxy 127.0.0.1:9000 {
       transport http {
-        versions h1
+        versions 1.1
       }
       header_up Host {upstream_hostport}
       header_up -Forwarded
@@ -43,7 +43,7 @@
   handle {
     reverse_proxy 127.0.0.1:3080 {
       transport http {
-        versions h1
+        versions 1.1
       }
       header_up Host {http.request.host}
       header_up -Forwarded
