@@ -1,0 +1,9 @@
+.git
+.github
+docs
+tests
+node_modules
+runtime/node_modules
+seed-profiles/*/node_modules
+*.log
+.DS_Store

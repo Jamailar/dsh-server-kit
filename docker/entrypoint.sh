@@ -1,0 +1,167 @@
+#!/bin/sh
+set -eu
+
+umask 077
+
+DSH_HOME=${DSH_HOME:-/data/dsh}
+DSH_SERVER_HOME=${DSH_SERVER_HOME:-/data/dsh-server}
+WORKSPACE_ROOT=${WORKSPACE_ROOT:-/workspace}
+DSH_INTERNAL_PORT=${DSH_INTERNAL_PORT:-3080}
+STATUS_PORT=${STATUS_PORT:-9000}
+DSH_UI_PRESET=${DSH_UI_PRESET:-base}
+DSH_TRUSTED_HOST=${DSH_TRUSTED_HOST:-}
+APP_ROOT=${APP_ROOT:-/app}
+SEED_ROOT=${SEED_ROOT:-/opt/dsh-seed}
+RUNTIME_ROOT=${RUNTIME_ROOT:-/app/runtime}
+export DSH_HOME DSH_SERVER_HOME WORKSPACE_ROOT DSH_INTERNAL_PORT STATUS_PORT DSH_UI_PRESET DSH_TRUSTED_HOST APP_ROOT SEED_ROOT RUNTIME_ROOT
+
+fail() {
+  printf '%s\n' "dsh-server-kit: $1" >&2
+  exit 1
+}
+
+require_absolute_path() {
+  case "$1" in
+    /*) ;;
+    *) fail "$2 must be an absolute path" ;;
+  esac
+}
+
+validate_port() {
+  case "$1" in
+    ''|*[!0-9]*) fail "$2 must be a decimal TCP port" ;;
+  esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ] || fail "$2 is outside the TCP port range"
+}
+
+validate_authority() {
+  [ -n "$DSH_TRUSTED_HOST" ] || fail 'DSH_TRUSTED_HOST is required'
+  node -e '
+    const value = process.argv[1]
+    if (value.includes(",") || /\s/.test(value) || value.includes("/") || value.includes("@")) process.exit(1)
+    let url
+    try { url = new URL(`http://${value}`) } catch { process.exit(1) }
+    if (url.host !== value || url.pathname !== "/" || url.search !== "" || url.hash !== "") process.exit(1)
+  ' "$DSH_TRUSTED_HOST" || fail 'DSH_TRUSTED_HOST must be one host or host:port authority without scheme or path'
+}
+
+run_as_dsh() {
+  if [ "$(id -u)" -eq 0 ]; then
+    setpriv --reuid=dsh --regid=dsh --init-groups "$@"
+  else
+    "$@"
+  fi
+}
+
+write_runtime_state() {
+  state_name=$1
+  state_tmp="$DSH_SERVER_HOME/.runtime-state.$$.tmp"
+  printf '{"state":"%s","release":"%s","updatedAt":"%s"}\n' \
+    "$state_name" "${DSH_SERVER_RELEASE:-0.1.0}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$state_tmp"
+  mv "$state_tmp" "$DSH_SERVER_HOME/runtime-state.json"
+}
+
+write_last_known_good() {
+  marker_tmp="$DSH_SERVER_HOME/.last-known-good.$$.tmp"
+  printf '{"release":"%s","preset":"%s","updatedAt":"%s"}\n' \
+    "${DSH_SERVER_RELEASE:-0.1.0}" "$DSH_UI_PRESET" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker_tmp"
+  mv "$marker_tmp" "$DSH_SERVER_HOME/last-known-good.json"
+}
+
+copy_seed_profile() {
+  profile_dir="$DSH_HOME/profiles/web"
+  [ -e "$profile_dir" ] && return 0
+  seed_dir="$SEED_ROOT/$DSH_UI_PRESET"
+  [ -d "$seed_dir" ] || fail "seed preset does not exist: $DSH_UI_PRESET"
+  profile_parent="$DSH_HOME/profiles"
+  seed_tmp="$profile_parent/.web.$DSH_UI_PRESET.$$.tmp"
+  mkdir -p "$profile_parent"
+  [ ! -e "$seed_tmp" ] || fail 'unexpected seed staging path exists'
+  cp -a "$seed_dir" "$seed_tmp"
+  mv "$seed_tmp" "$profile_dir"
+}
+
+seed_admin_if_needed() {
+  users_file="$DSH_HOME/auth/users.yaml"
+  [ -s "$users_file" ] && return 0
+  [ -n "${DSH_ADMIN_USERNAME:-}" ] || fail 'DSH_ADMIN_USERNAME is required when no auth user exists'
+  [ -n "${DSH_ADMIN_PASSWORD:-}" ] || fail 'DSH_ADMIN_PASSWORD is required when no auth user exists'
+  auth_cli="$DSH_HOME/profiles/web/node_modules/dsh-auth-gate/lib/cli.js"
+  [ -r "$auth_cli" ] || fail 'seed profile has no dsh-auth-gate CLI'
+  mkdir -p "$DSH_HOME/auth"
+  printf '%s\n' "$DSH_ADMIN_PASSWORD" | run_as_dsh node "$auth_cli" user add "$DSH_ADMIN_USERNAME" --password-stdin
+  unset DSH_ADMIN_PASSWORD
+  unset DSH_ADMIN_USERNAME
+}
+
+stop_services() {
+  trap - TERM INT EXIT
+  write_runtime_state stopping || true
+  [ -n "${CADDY_PID:-}" ] && kill "$CADDY_PID" 2>/dev/null || true
+  [ -n "${DSH_PID:-}" ] && kill "$DSH_PID" 2>/dev/null || true
+  [ -n "${STATUS_PID:-}" ] && kill "$STATUS_PID" 2>/dev/null || true
+  [ -n "${CADDY_PID:-}" ] && wait "$CADDY_PID" 2>/dev/null || true
+  [ -n "${DSH_PID:-}" ] && wait "$DSH_PID" 2>/dev/null || true
+  [ -n "${STATUS_PID:-}" ] && wait "$STATUS_PID" 2>/dev/null || true
+}
+
+require_absolute_path "$DSH_HOME" DSH_HOME
+require_absolute_path "$DSH_SERVER_HOME" DSH_SERVER_HOME
+require_absolute_path "$WORKSPACE_ROOT" WORKSPACE_ROOT
+validate_port "$DSH_INTERNAL_PORT" DSH_INTERNAL_PORT
+validate_port "$STATUS_PORT" STATUS_PORT
+case "$DSH_UI_PRESET" in base|workbench) ;; *) fail 'DSH_UI_PRESET must be base or workbench' ;; esac
+validate_authority
+
+mkdir -p "$DSH_HOME" "$DSH_SERVER_HOME" "$WORKSPACE_ROOT"
+if [ "$(id -u)" -eq 0 ]; then
+  chown dsh:dsh "$DSH_HOME" "$DSH_SERVER_HOME" "$WORKSPACE_ROOT"
+  chmod 0700 "$DSH_HOME" "$DSH_SERVER_HOME"
+fi
+[ -w "$DSH_HOME" ] && [ -w "$DSH_SERVER_HOME" ] && [ -w "$WORKSPACE_ROOT" ] || fail 'persistent paths must be writable by the dsh runtime user'
+
+copy_seed_profile
+if [ "$(id -u)" -eq 0 ]; then
+  chown -R dsh:dsh "$DSH_HOME/profiles" "$DSH_HOME/auth" 2>/dev/null || chown -R dsh:dsh "$DSH_HOME/profiles"
+fi
+
+DSH_SERVER_RELEASE=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).release.version)' "$APP_ROOT/config/release-manifest.json")
+export DSH_SERVER_RELEASE
+run_as_dsh node "$APP_ROOT/scripts/preflight-upgrade.mjs" --home "$DSH_HOME" --preset "$DSH_UI_PRESET"
+seed_admin_if_needed
+
+write_runtime_state starting
+trap stop_services TERM INT EXIT
+cd "$WORKSPACE_ROOT"
+
+run_as_dsh "$RUNTIME_ROOT/node_modules/.bin/dsh" web \
+  --host 127.0.0.1 \
+  --port "$DSH_INTERNAL_PORT" \
+  --trusted-host "$DSH_TRUSTED_HOST" &
+DSH_PID=$!
+
+run_as_dsh node "$APP_ROOT/scripts/probe-auth-gate.mjs" \
+  --port "$DSH_INTERNAL_PORT" \
+  --trusted-host "$DSH_TRUSTED_HOST" \
+  --wait-ms 60000
+
+run_as_dsh env \
+  STATUS_PORT="$STATUS_PORT" \
+  DSH_INTERNAL_PORT="$DSH_INTERNAL_PORT" \
+  DSH_TRUSTED_HOST="$DSH_TRUSTED_HOST" \
+  RUNTIME_STATE_PATH="$DSH_SERVER_HOME/runtime-state.json" \
+  RELEASE_MANIFEST_PATH="$APP_ROOT/config/release-manifest.json" \
+  node "$APP_ROOT/src/status-server.mjs" &
+STATUS_PID=$!
+
+run_as_dsh caddy run --config "$APP_ROOT/config/Caddyfile" --adapter caddyfile &
+CADDY_PID=$!
+
+write_runtime_state ready
+write_last_known_good
+
+while kill -0 "$DSH_PID" 2>/dev/null && kill -0 "$CADDY_PID" 2>/dev/null && kill -0 "$STATUS_PID" 2>/dev/null; do
+  sleep 2
+done
+
+fail 'a required service stopped'

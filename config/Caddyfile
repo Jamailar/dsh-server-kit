@@ -1,0 +1,43 @@
+{
+  admin off
+  auto_https off
+  grace_period 10s
+}
+
+:8080 {
+  # These endpoints intentionally bypass DSH authentication. They expose only
+  # readiness and the locked release tuple, never DSH configuration or logs.
+  @status path /healthz /readyz /versionz
+  handle @status {
+    reverse_proxy 127.0.0.1:9000 {
+      transport http {
+        versions h1
+      }
+      header_up Host {upstream_hostport}
+      header_up -Forwarded
+      header_up -X-Forwarded-For
+      header_up -X-Forwarded-Host
+      header_up -X-Forwarded-Proto
+      header_up -X-Real-IP
+      header_up -X-Dsh-Proxy
+    }
+  }
+
+  # DSH's browser-trust fence validates the public authority supplied at
+  # startup through --trusted-host. Preserve the browser Host for that check;
+  # changing it to loopback would disable the defense.
+  handle {
+    reverse_proxy 127.0.0.1:3080 {
+      transport http {
+        versions h1
+      }
+      header_up Host {http.request.host}
+      header_up -Forwarded
+      header_up -X-Forwarded-For
+      header_up -X-Forwarded-Host
+      header_up -X-Forwarded-Proto
+      header_up -X-Real-IP
+      header_up -X-Dsh-Proxy
+    }
+  }
+}

@@ -1,0 +1,24 @@
+services:
+  dsh:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dsh-server-kit:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DSH_TRUSTED_HOST: ${DSH_TRUSTED_HOST:?Set the exact public authority, for example dsh.example.com}
+      DSH_ADMIN_USERNAME: ${DSH_ADMIN_USERNAME:-admin}
+      # Required only while /data/dsh/auth/users.yaml does not yet exist.
+      DSH_ADMIN_PASSWORD: ${DSH_ADMIN_PASSWORD:-}
+      DSH_UI_PRESET: ${DSH_UI_PRESET:-base}
+    volumes:
+      - dsh-home:/data/dsh
+      - dsh-server:/data/dsh-server
+      - dsh-workspace:/workspace
+
+volumes:
+  dsh-home:
+  dsh-server:
+  dsh-workspace:
