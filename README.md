@@ -37,10 +37,12 @@ Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。�
 
 ## 部署
 
-1. 为 `/data/dsh`、`/data/dsh-server`、`/workspace` 创建独立持久卷。
+1. 创建一个持久卷并挂载到 `/data`。认证、运行配置和工作区分别位于 `/data/dsh`、`/data/dsh-server`、`/data/workspace`。
 2. 仅发布容器 `8080`，在 Coolify 配置 HTTPS 域名。
 3. 首次启动后，打开该 HTTPS 域名的 `/setup`，输入域名、管理员用户名或邮箱和密码。
 4. 向导会把域名与 bcrypt 用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
+
+如果已按旧配置创建过三个独立 Volume，升级前先创建 `/data` 的快照，并将旧的 `dsh-home`、`dsh-server`、`dsh-workspace` 内容分别复制到新 Volume 的 `dsh`、`dsh-server`、`workspace` 子目录。不要把空的 `/data` 挂到已有实例上，否则它会被当作新实例初始化。
 
 本地构建命令：
 
@@ -70,9 +72,9 @@ curl -H 'Host: localhost:8080' http://127.0.0.1:8080/readyz
 
 ## 升级与回滚
 
-每次升级只替换镜像，绝不覆盖 `/data/dsh`。启动前 `scripts/preflight-upgrade.mjs` 会检查 Profile 的依赖、bundle 顺序、锁文件和 Auth 配置 attestation；不匹配就 fail closed，不尝试“自动修复”或悄悄升级用户插件。
+每次升级只替换镜像，绝不覆盖 `/data`。启动前 `scripts/preflight-upgrade.mjs` 会检查 Profile 的依赖、bundle 顺序、锁文件和 Auth 配置 attestation；不匹配就 fail closed，不尝试“自动修复”或悄悄升级用户插件。
 
-升级动作：先对三个 Volume 建快照 → 记录当前 image digest → 部署新 digest → 等待 `/readyz` → 验证匿名请求得到 `401` 与登录流程。失败时切回上一个 digest；持久卷不应被新镜像迁移或修改。
+升级动作：先对 `/data` Volume 建快照 → 记录当前 image digest → 部署新 digest → 等待 `/readyz` → 验证匿名请求得到 `401` 与登录流程。失败时切回上一个 digest；持久卷不应被新镜像迁移或修改。
 
 ## 验证
 

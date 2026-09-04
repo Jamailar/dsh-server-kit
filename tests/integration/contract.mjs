@@ -23,4 +23,7 @@ for (const [name, expression] of required) {
   if (!expression.test(target)) throw new Error(`contract missing: ${name}`)
 }
 
+if (!/VOLUME \["\/data"\]/.test(dockerfile)) throw new Error('contract missing: single persistent data root')
+if (!/WORKSPACE_ROOT=\/data\/workspace/.test(dockerfile)) throw new Error('contract missing: workspace inside persistent data root')
+
 process.stdout.write('static container contract verified\n')

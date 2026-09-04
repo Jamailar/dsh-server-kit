@@ -14,11 +14,7 @@ services:
       # Optional. Use code to require a setup code from the first container log.
       DSH_SETUP_PROTECTION: ${DSH_SETUP_PROTECTION:-open}
     volumes:
-      - dsh-home:/data/dsh
-      - dsh-server:/data/dsh-server
-      - dsh-workspace:/workspace
+      - dsh-data:/data
 
 volumes:
-  dsh-home:
-  dsh-server:
-  dsh-workspace:
+  dsh-data:

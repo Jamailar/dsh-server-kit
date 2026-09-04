@@ -110,7 +110,7 @@ Coolify / Traefik
 └──────────────────────────────────────────────────────────────────────────┘
   │                 │                       │
   ▼                 ▼                       ▼
-+/data/dsh     /data/dsh-server          /workspace
++/data/dsh     /data/dsh-server       /data/workspace
 ```
 
 ### 5.1 信任边界
@@ -174,13 +174,15 @@ Server Kit 不运行 `dsh plugin add ...@latest`，也不调用 UI Bundle 的一
 
 ## 7. 数据、配置与首次启动
 
-### 7.1 三个 Volume
+### 7.1 单个持久化根目录
 
-| 路径 | 内容 | 规则 |
+部署只挂载一个 Volume：容器路径 `/data`。其内部目录由启动器创建并保持最小权限：
+
+| 子目录 | 内容 | 规则 |
 | --- | --- | --- |
 | `/data/dsh` | Profile、Settings、模型凭据、会话、插件及 Auth Bundle 自身状态 | 最高敏感；升级镜像不得覆盖；备份必须加密。 |
 | `/data/dsh-server` | 初始化记录、兼容 marker、最后成功的 release metadata、升级锁和诊断摘要 | 不存明文密码、session 或 API Key。 |
-| `/workspace` | Agent 实际读写的用户项目 | 所有登录者共享；不是隔离边界。 |
+| `/data/workspace` | Agent 实际读写的用户项目 | 所有登录者共享；不是隔离边界。 |
 
 ### 7.2 环境变量
 
@@ -191,7 +193,7 @@ Server Kit 不运行 `dsh plugin add ...@latest`，也不调用 UI Bundle 的一
 # Optional runtime values.
 DSH_HOME=/data/dsh
 DSH_SERVER_HOME=/data/dsh-server
-WORKSPACE_ROOT=/workspace
+WORKSPACE_ROOT=/data/workspace
 DSH_INTERNAL_PORT=3080
 DSH_PUBLIC_PORT=8080
 DSH_UI_PRESET=base
@@ -284,7 +286,7 @@ one DSH instance
   ↓
 one shared DSH_HOME
   ↓
-one shared /workspace
+one shared /data/workspace
 ```
 
 即使 Auth Bundle 将来支持多个账号，也不能据此声称数据、会话、Agent、模型凭据或文件已隔离。多用户与多租户是另一个产品，不进入 v0.1。
@@ -406,13 +408,7 @@ write new lastKnownGood marker
 
 回滚标准动作是“上一 immutable image digest + 原 Volume”。未做迁移时，应立即恢复服务。
 
-每次升级前都备份：
-
-```text
-/data/dsh
-/data/dsh-server
-/workspace
-```
+每次升级前都对 `/data` 做一个加密 Volume Snapshot；该快照包含 DSH 状态、运行配置和工作区。
 
 `/data/dsh` 可能含模型与插件凭据，备份必须加密。v0.1 不开发自有备份服务，只提供 Docker / Coolify Snapshot 的可验证操作文档。
 
@@ -488,7 +484,7 @@ v0.1 是可公开部署的单管理员服务器发行版，不发布“只有 Do
 - 通过 POC 后锁定的 Auth Bundle，保护页面、API 和 WebSocket；
 - `base` seed Profile，首次初始化无网络依赖；
 - `workbench` seed Profile 的兼容构建与验收；其失败不阻塞 `base` 发布；
-- 三个 Volume、权限校验、`healthz` / `readyz` / `versionz`；
+- 单个 `/data` Volume、权限校验、`healthz` / `readyz` / `versionz`；
 - release manifest、runtime marker、旧 Volume 升级和回滚契约；
 - Docker Compose、Coolify、备份、升级、回滚和安全模型文档；
 - GitHub Actions、GHCR amd64 / arm64 镜像、Renovate；
@@ -588,11 +584,13 @@ ghcr.io/<owner>/dsh-server-kit:sha-<git-sha>
 
 1. 从 Git Repository 选择 Dockerfile；
 2. 仅发布容器端口 `8080`；
-3. 创建 `/data/dsh`、`/data/dsh-server`、`/workspace` 三个 Volume；
+3. 创建一个 Persistent Storage，容器挂载路径设为 `/data`；
 4. 配置 HTTPS 域名；
 5. 首次部署后，访问 `/setup` 创建管理员（用户名或邮箱）并确认域名；若域名已公开，设置可选变量 `DSH_SETUP_PROTECTION=code` 后再从首启日志复制一次性码；
 6. 等待 `/readyz`，再通过浏览器登录；
 7. 第一次升级前创建 Volume Snapshot，并记录当前 image digest。
+
+旧版三 Volume 部署迁移时，先对三卷创建快照，将它们的内容分别复制到新 `/data` Volume 的 `dsh`、`dsh-server`、`workspace` 子目录，再切换挂载；不得以空 `/data` 覆盖已有实例。
 
 ### 16.3 日志与诊断
 

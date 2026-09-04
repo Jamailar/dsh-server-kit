@@ -41,19 +41,19 @@ COPY src /app/src
 COPY scripts /app/scripts
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 RUN chmod 0755 /app/docker/entrypoint.sh \
- && mkdir -p /data/dsh /data/dsh-server /workspace \
- && chown dsh:dsh /data/dsh /data/dsh-server /workspace
+ && mkdir -p /data/dsh /data/dsh-server /data/workspace \
+ && chown dsh:dsh /data/dsh /data/dsh-server /data/workspace
 
 ENV DSH_HOME=/data/dsh \
     DSH_SERVER_HOME=/data/dsh-server \
-    WORKSPACE_ROOT=/workspace \
+    WORKSPACE_ROOT=/data/workspace \
     DSH_INTERNAL_PORT=3080 \
     STATUS_PORT=9000 \
     DSH_UI_PRESET=base \
     DSH_SETUP_PROTECTION=open
 
 EXPOSE 8080
-VOLUME ["/data/dsh", "/data/dsh-server", "/workspace"]
+VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD node -e "const fs = require('node:fs'); let headers = {}; try { headers = { Host: JSON.parse(fs.readFileSync('/data/dsh-server/runtime-config.json', 'utf8')).trustedHost }; } catch {} fetch('http://127.0.0.1:8080/healthz', { headers }).then((res) => process.exit(res.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker/entrypoint.sh"]
