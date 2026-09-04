@@ -57,7 +57,7 @@ curl http://127.0.0.1:8080/readyz
 ## 预置与边界
 
 - `DSH_UI_PRESET=base`：上游 DSH Web UI + Auth Gate，默认且最小。
-- `DSH_UI_PRESET=workbench`：在同一个安全边界内预装 `dsh-better-sidebar`。仅在 CI 的真实容器启动、认证与浏览器验收通过后才可作为生产预置使用。
+- `DSH_UI_PRESET=workbench`：在同一个安全边界内预装 `dsh-better-sidebar`。v0.1 仅验证其锁定构建与容器启动；在补上真实浏览器功能验收前，不标为生产支持预置。
 - `dsh-web-all`：不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
 
 公开域名登录后，上游 DSH 仍把完整 Settings 编辑限制在 loopback origin。这是原生安全边界，不在本项目中用前端 patch 或 Host 伪造绕过。需要完整 Settings 编辑时，管理员使用 SSH 隧道或受控本机的 Auth Gate loopback proxy；该 proxy 不由 Caddy 暴露。
