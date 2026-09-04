@@ -2,7 +2,7 @@
   "name": "dsh-server-kit-runtime",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.2-rc.1"
   }

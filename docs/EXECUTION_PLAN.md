@@ -600,7 +600,7 @@ ghcr.io/<owner>/dsh-server-kit:sha-<git-sha>
 
 以下不是架构待决项，而是每次新发行必须重新运行的准入矩阵：
 
-1. 当前基线固定为 DSH `0.1.2-rc.1`、`dsh-auth-gate` `0.12.0`、`dsh-better-sidebar` `0.18.0`；三个 npm integrity、三个 Profile lockfile 与基础镜像 digest 进入 manifest 和 Git。
+1. 当前基线固定为 DSH `0.1.2-rc.1`、`dsh-auth-gate` `0.12.0`、`dsh-better-sidebar` `0.18.0`、构建器 `pnpm` `10.33.0`；三个 npm integrity、三个 Profile lockfile 与基础镜像 digest 进入 manifest 和 Git。构建器版本必须与锁生成版本一致，避免 pnpm 11 的最小发布年龄策略在已审计 lockfile 上产生非确定性拒绝。
 2. `base` 是唯一默认预置。`workbench` 已预构建但仅在每次锁定组合完成真实容器启动、认证与浏览器验收后才标为生产支持。
 3. `dsh-web-all` 继续是受控 community 路径，不会进入发行镜像。
 4. Auth Gate 的容器内登录限流只能看到 Caddy；Coolify / Traefik / Cloudflare 必须配置真实客户端 IP 限流。

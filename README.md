@@ -14,7 +14,7 @@
 | Node | `24.14.0` |
 | Caddy | `2.10.2` |
 
-全部 npm 依赖通过提交的 `pnpm-lock.yaml` 锁定；基础镜像以 digest 锁定。运行时绝不执行 `npm install`、`pnpm add` 或下载社区插件。
+全部 npm 依赖通过提交的 `pnpm-lock.yaml` 锁定，并由 `pnpm@10.33.0` 构建；基础镜像以 digest 锁定。运行时绝不执行 `npm install`、`pnpm add` 或下载社区插件。
 
 ## 信任边界
 

@@ -3,7 +3,7 @@ ARG NODE_IMAGE=node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4
 ARG CADDY_IMAGE=caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
 
 FROM ${NODE_IMAGE} AS dependencies
-ARG PNPM_VERSION=11.7.0
+ARG PNPM_VERSION=10.33.0
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends python3 make g++ \
