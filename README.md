@@ -1,2 +1,79 @@
-# dsh-server-kit
+# DSH Server Kit
 
+把上游 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 封装为可部署、可升级的单管理员服务器发行版。
+
+它不是新的 DSH UI 或 Gateway。DSH 提供 UI 与 Agent runtime；`dsh-auth-gate` 负责登录、会话以及 HTTP/WebSocket 守卫；Caddy 只提供安全反代；本仓库只负责不可变依赖、首启、健康状态、升级检查与部署契约。
+
+## 当前发行组合
+
+| 层 | 固定版本 |
+| --- | --- |
+| DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
+| 认证 | `dsh-auth-gate@0.12.0`，密码模式、Secure Cookie、可选 TOTP |
+| 可选工作台 | `dsh-better-sidebar@0.18.0` |
+| Node | `24.14.0` |
+| Caddy | `2.10.2` |
+
+全部 npm 依赖通过提交的 `pnpm-lock.yaml` 锁定；基础镜像以 digest 锁定。运行时绝不执行 `npm install`、`pnpm add` 或下载社区插件。
+
+## 信任边界
+
+```text
+HTTPS / Coolify / Traefik
+        │ :8080
+        ▼
+      Caddy ── /healthz, /readyz, /versionz → status :9000
+        │
+        └── 保留公开 Host、移除外部转发标记 → DSH :3080 (127.0.0.1)
+                                                       │
+                                                       └── Auth Gate: page + API + WS
+```
+
+必须设置 `DSH_TRUSTED_HOST` 为一个准确的公开 authority，例如 `dsh.example.com` 或 `dsh.example.com:8443`。启动器把它传给 DSH 的 `--trusted-host`，而 Caddy 保留浏览器的 `Host` 供 DSH 自己的 browser-trust fence 验证。不要使用 `https://`、路径、通配符或多个域名。
+
+端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。因此登录限流应同时在 Coolify/Traefik/Cloudflare 边缘配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
+
+## 部署
+
+1. 复制 `.env.example` 到未提交的 `.env`，填写真实域名和首个管理员密码。
+2. 用 Coolify 的 Secret 保存 `DSH_ADMIN_PASSWORD`；不要把它提交到 Git。
+3. 为 `/data/dsh`、`/data/dsh-server`、`/workspace` 创建独立持久卷。
+4. 仅发布容器 `8080`，由 Coolify/Traefik 终止 HTTPS。
+5. 启动后等待 `GET /readyz` 返回 `200`，再在 HTTPS 域名登录。
+
+本地构建命令：
+
+```sh
+docker compose --env-file .env up --build -d
+curl http://127.0.0.1:8080/readyz
+```
+
+直接 HTTP 只适合检查健康状态，不能用于登录：认证 Cookie 强制 `Secure`。生产必须在 HTTPS 后面运行。
+
+首次启动时，若 `/data/dsh/auth/users.yaml` 不存在，启动器要求 `DSH_ADMIN_USERNAME` 和 `DSH_ADMIN_PASSWORD`，通过 Auth Gate 自己的 CLI 和 stdin 创建 bcrypt 用户记录。密码不会写入镜像、Volume、状态端点或日志。账号创建成功后可从部署 Secret 中移除这两个变量；再次启动不会要求它们。
+
+## 预置与边界
+
+- `DSH_UI_PRESET=base`：上游 DSH Web UI + Auth Gate，默认且最小。
+- `DSH_UI_PRESET=workbench`：在同一个安全边界内预装 `dsh-better-sidebar`。仅在 CI 的真实容器启动、认证与浏览器验收通过后才可作为生产预置使用。
+- `dsh-web-all`：不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
+
+公开域名登录后，上游 DSH 仍把完整 Settings 编辑限制在 loopback origin。这是原生安全边界，不在本项目中用前端 patch 或 Host 伪造绕过。需要完整 Settings 编辑时，管理员使用 SSH 隧道或受控本机的 Auth Gate loopback proxy；该 proxy 不由 Caddy 暴露。
+
+这是单一可信管理员、共享工作区实例，不是多用户隔离或多租户产品。
+
+## 升级与回滚
+
+每次升级只替换镜像，绝不覆盖 `/data/dsh`。启动前 `scripts/preflight-upgrade.mjs` 会检查 Profile 的依赖、bundle 顺序、锁文件和 Auth 配置 attestation；不匹配就 fail closed，不尝试“自动修复”或悄悄升级用户插件。
+
+升级动作：先对三个 Volume 建快照 → 记录当前 image digest → 部署新 digest → 等待 `/readyz` → 验证匿名请求得到 `401` 与登录流程。失败时切回上一个 digest；持久卷不应被新镜像迁移或修改。
+
+## 验证
+
+```sh
+node scripts/build-seed-profile.mjs --verify-only
+node --test tests/unit/*.test.mjs
+node tests/integration/contract.mjs
+```
+
+GitHub Actions 在 Node 24 下执行上述检查，并构建真实容器，确认 `readyz`、匿名 `401` 与 Auth Gate 状态端点。完整架构、组件准入和 Coolify 操作见 [执行计划](docs/EXECUTION_PLAN.md)。
