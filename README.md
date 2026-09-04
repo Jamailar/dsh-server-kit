@@ -128,6 +128,22 @@ docker rm dsh-server-kit
 
 公开域名登录后，上游 DSH 仍把完整 Settings 编辑限制在 loopback origin。这是原生安全边界，不在本项目中用前端 patch 或 Host 伪造绕过。需要完整 Settings 编辑时，管理员使用 SSH 隧道或受控本机的 Auth Gate loopback proxy；该 proxy 不由 Caddy 暴露。
 
+### 在本机安全编辑模型与提供方
+
+公开域名中的聊天和模型选择可直接使用；但 DSH 会拒绝在非 loopback 域名里编辑“设置 → 模型/提供方/凭据”。这是 DSH 客户端的安全限制，不是登录或容器故障。
+
+需要在自己的电脑上编辑这些设置时，在本机安装 Node `>=22.19.0` 后运行一次受认证的 loopback proxy：
+
+```sh
+npm install --global dsh-auth-gate@0.12.0
+dsh-auth-proxy \
+  --listen 127.0.0.1:8443 \
+  --target https://dsh.example.com \
+  --mark-proxy
+```
+
+然后访问 `http://127.0.0.1:8443` 并正常登录。该代理只监听本机，不会把服务暴露到局域网；`--mark-proxy` 会让服务端拒绝目录选择、打开路径和本机模型扫描等不应由远程浏览器触发的宿主操作。关闭此命令即可结束本机入口。
+
 这是单一可信管理员、共享工作区实例，不是多用户隔离或多租户产品。
 
 ## 升级与回滚

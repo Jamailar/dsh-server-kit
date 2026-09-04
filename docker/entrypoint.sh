@@ -228,6 +228,18 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 [ -w "$DSH_HOME" ] && [ -w "$DSH_SERVER_HOME" ] && [ -w "$WORKSPACE_ROOT" ] || fail 'persistent paths must be writable by the dsh runtime user'
 
+# `setpriv` changes the process uid but deliberately keeps its environment.
+# Give DSH a real, writable home so browser-side directory selection starts in
+# the persistent workspace instead of the image user's inaccessible `/root`.
+HOME=$WORKSPACE_ROOT
+XDG_CONFIG_HOME=$DSH_SERVER_HOME/xdg-config
+XDG_DATA_HOME=$DSH_SERVER_HOME/xdg-data
+export HOME XDG_CONFIG_HOME XDG_DATA_HOME
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+if [ "$(id -u)" -eq 0 ]; then
+  chown dsh:dsh "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+fi
+
 copy_seed_profile
 repair_seed_profile_if_needed
 if [ "$(id -u)" -eq 0 ]; then

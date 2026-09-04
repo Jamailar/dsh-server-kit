@@ -19,6 +19,15 @@
     file_server
   }
 
+  # Browsers fetch the PWA metadata before authentication. It is static public
+  # branding only, so serve it directly instead of producing a noisy 401.
+  handle /manifest.webmanifest {
+    root * /app/src/assets
+    header Cache-Control "no-store"
+    header Content-Type "application/manifest+json"
+    file_server
+  }
+
   # These endpoints intentionally bypass DSH authentication. They expose only
   # readiness and the locked release tuple, never DSH configuration or logs.
   @status path /healthz /readyz /versionz
@@ -33,7 +42,6 @@
       header_up -X-Forwarded-Host
       header_up -X-Forwarded-Proto
       header_up -X-Real-IP
-      header_up -X-Dsh-Proxy
     }
   }
 
@@ -51,7 +59,9 @@
       header_up -X-Forwarded-Host
       header_up -X-Forwarded-Proto
       header_up -X-Real-IP
-      header_up -X-Dsh-Proxy
+      # `dsh-auth-proxy --mark-proxy` uses this deny-only marker to disable
+      # server-native APIs when the browser is presented through localhost.
+      # A forged marker can only remove capabilities; it can never grant one.
     }
   }
 }

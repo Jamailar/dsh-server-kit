@@ -36,7 +36,7 @@ RUN apt-get update \
  && apt-get install --yes --no-install-recommends tini util-linux ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 10001 dsh \
- && useradd --uid 10001 --gid dsh --create-home --home-dir /nonexistent --shell /usr/sbin/nologin dsh
+ && useradd --uid 10001 --gid dsh --no-create-home --home-dir /data/workspace --shell /usr/sbin/nologin dsh
 
 WORKDIR /app
 COPY --from=dependencies /app/runtime /app/runtime
@@ -47,12 +47,14 @@ COPY src /app/src
 COPY scripts /app/scripts
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 RUN chmod 0755 /app/docker/entrypoint.sh \
+ && /usr/bin/caddy fmt --overwrite /app/config/Caddyfile \
  && mkdir -p /data/dsh /data/dsh-server /data/workspace \
  && chown dsh:dsh /data/dsh /data/dsh-server /data/workspace
 
 ENV DSH_HOME=/data/dsh \
     DSH_SERVER_HOME=/data/dsh-server \
     WORKSPACE_ROOT=/data/workspace \
+    HOME=/data/workspace \
     DSH_INTERNAL_PORT=3080 \
     STATUS_PORT=9000 \
     DSH_UI_PRESET=base \
