@@ -14,6 +14,7 @@ const required = [
   ['DSH trusted host', /--trusted-host "\$DSH_TRUSTED_HOST"/],
   ['auth gate probe', /probe-auth-gate\.mjs/],
   ['Caddy public host preservation', /header_up Host \{http\.request\.host\}/],
+  ['Caddy trusted host rejection', /@invalid_host not host \{\$DSH_TRUSTED_HOST\}/],
   ['no published DSH port', /EXPOSE 8080/],
 ]
 

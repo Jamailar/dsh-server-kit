@@ -76,6 +76,7 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   assert.equal(manifest.presets.workbench.packages['dsh-better-sidebar'], manifest.runtime.betterSidebar.version)
 
   const caddyfile = await readFile(new URL('config/Caddyfile', projectRoot), 'utf8')
+  assert.match(caddyfile, /@invalid_host not host \{\$DSH_TRUSTED_HOST\}/)
   assert.match(caddyfile, /header_up Host \{http\.request\.host\}/)
   assert.match(caddyfile, /header_up -X-Dsh-Proxy/)
   assert.doesNotMatch(caddyfile, /header_up Host 127\.0\.0\.1/)

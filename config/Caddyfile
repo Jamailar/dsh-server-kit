@@ -5,6 +5,12 @@
 }
 
 :8080 {
+  # Reject every authority except the exact startup value before it can reach
+  # either status endpoints or DSH. This mirrors (rather than replaces) DSH's
+  # own --trusted-host browser fence.
+  @invalid_host not host {$DSH_TRUSTED_HOST}
+  respond @invalid_host 421
+
   # These endpoints intentionally bypass DSH authentication. They expose only
   # readiness and the locked release tuple, never DSH configuration or logs.
   @status path /healthz /readyz /versionz

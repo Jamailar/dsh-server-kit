@@ -115,7 +115,7 @@ Coolify / Traefik
 
 1. Coolify / Traefik 终止 TLS；容器只接受 :8080 请求。
 2. Docker 只发布 `8080`；`3080` 和 `9000` 永不发布。
-3. Caddy 只连接 `127.0.0.1:3080`，但保留外部请求的 `Host`；启动 DSH 时将唯一、经配置验证的公开 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此拒绝任意 Host；绝不将 Host 改写为 loopback 来绕过该栅栏。
+3. Caddy 先以 `DSH_TRUSTED_HOST` 拒绝任意其它 `Host`，再只连接 `127.0.0.1:3080` 并保留该公开 Host；启动 DSH 时将同一个、经配置验证的 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此做第二次验证；绝不将 Host 改写为 loopback 来绕过该栅栏。
 4. Auth Bundle 在 DSH 路由层拦截页面、`/api/*`、WebSocket upgrade、SSE 和未来路由。
 5. UI Bundle 不得监听额外公网端口。Tunnel、SSH、remote API 或后台定时运行默认关闭，除非单独准入。
 6. 容器以专用非 root 用户运行；持久化目录最小权限为 `0700`；密码和 API Key 不进入镜像、日志或 manifest。

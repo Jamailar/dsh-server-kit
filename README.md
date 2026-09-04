@@ -31,6 +31,8 @@ HTTPS / Coolify / Traefik
 
 必须设置 `DSH_TRUSTED_HOST` 为一个准确的公开 authority，例如 `dsh.example.com` 或 `dsh.example.com:8443`。启动器把它传给 DSH 的 `--trusted-host`，而 Caddy 保留浏览器的 `Host` 供 DSH 自己的 browser-trust fence 验证。不要使用 `https://`、路径、通配符或多个域名。
 
+Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`，因此健康检查、Coolify 域名和 `DSH_TRUSTED_HOST` 必须一致。
+
 端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。因此登录限流应同时在 Coolify/Traefik/Cloudflare 边缘配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
 
 ## 部署
