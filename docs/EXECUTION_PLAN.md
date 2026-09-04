@@ -1,6 +1,6 @@
 # DSH Server Kit 执行计划
 
-> 状态：架构 v2.1，v0.1 基础发行层已实现；真实容器验收由 CI 执行
+> 状态：架构 v2.2，v0.1 基础发行层已实现；真实容器验收由 CI 执行
 > 更新：2026-09-04
 > 变更：不再自研 DSH 主 Web UI、账户体系或通用 HTTP/WebSocket Gateway；优先复用 DSH 生态的可审计组件，项目收敛为安全、可升级的服务器发行层。
 > 历史版本：[采用复用架构前的完整规划](archive/EXECUTION_PLAN_PRE_REUSE_ARCHITECTURE.md)
@@ -56,7 +56,8 @@ DSH Server Kit = 可复现、安全、可运维的 DSH 服务器装配与兼容�
 
 | 模块 | 具体职责 | 不承担的职责 |
 | --- | --- | --- |
-| `docker/entrypoint.sh` | 校验输入、初始化 Volume、拷贝 seed Profile、启动和停止子进程 | 不在运行时从 npm / GitHub 下载插件。 |
+| `docker/entrypoint.sh` | 校验输入、初始化 Volume、拷贝 seed Profile、读取持久化运行配置、启动和停止子进程 | 不在运行时从 npm / GitHub 下载插件。 |
+| `src/setup-server.mjs` | 仅在未初始化时提供 `/setup`、验证一次性码、调用 Auth Gate CLI 并原子写入非敏感配置 | 不代理 DSH、不实现密码哈希、会话或通用管理后台。 |
 | `src/status-server.mjs` | loopback `/healthz`、`/readyz`、`/versionz`，读取非敏感运行状态 | 不代理 DSH，不保存用户和会话。 |
 | `config/Caddyfile` | 只暴露 :8080；路由状态端点并反代其它请求 | 不做认证、不保存状态、不签发 TLS。 |
 | `scripts/build-seed-profile.mjs` | 从 release manifest 生成可复现 base / workbench Profile 与锁文件 | 不扫描或修复用户任意插件。 |
@@ -95,7 +96,8 @@ Coolify / Traefik
   │ only container :8080
   ▼
 ┌──────────────────────── dsh-server-kit container ───────────────────────┐
-│ Caddy :8080                                                              │
+│ first start only: setup-server :8080 → one-time code + administrator     │
+│ after setup: Caddy :8080                                                  │
 │   ├─ /healthz, /readyz, /versionz → status-server :9000 (loopback)      │
 │   └─ all other HTTP / WebSocket / SSE → DSH :3080 (loopback)            │
 │                                                                          │
@@ -115,7 +117,7 @@ Coolify / Traefik
 
 1. Coolify / Traefik 终止 TLS；容器只接受 :8080 请求。
 2. Docker 只发布 `8080`；`3080` 和 `9000` 永不发布。
-3. Caddy 先以 `DSH_TRUSTED_HOST` 拒绝任意其它 `Host`，再只连接 `127.0.0.1:3080` 并保留该公开 Host；启动 DSH 时将同一个、经配置验证的 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此做第二次验证；绝不将 Host 改写为 loopback 来绕过该栅栏。
+3. 新实例先启动最小的 `/setup` 服务器；管理员以一次性初始化码在浏览器提交公开 authority 与账户。配置持久化后，Caddy 才以该 authority 拒绝任意其它 `Host`，并只连接 `127.0.0.1:3080`、保留该公开 Host；启动 DSH 时将同一个、经配置验证的 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此做第二次验证；绝不将 Host 改写为 loopback 来绕过该栅栏。
 4. Auth Bundle 在 DSH 路由层拦截页面、`/api/*`、WebSocket upgrade、SSE 和未来路由。
 5. UI Bundle 不得监听额外公网端口。Tunnel、SSH、remote API 或后台定时运行默认关闭，除非单独准入。
 6. 容器以专用非 root 用户运行；持久化目录最小权限为 `0700`；密码和 API Key 不进入镜像、日志或 manifest。
@@ -183,17 +185,11 @@ Server Kit 不运行 `dsh plugin add ...@latest`，也不调用 UI Bundle 的一
 ### 7.2 环境变量
 
 ```dotenv
-# Required on first start only: injected by Coolify secret store; never committed.
-# The entrypoint uses these to let dsh-auth-gate create a bcrypt user record,
-# then never writes the plaintext values to a Volume or log.
-DSH_ADMIN_USERNAME=admin
-DSH_ADMIN_PASSWORD=replace-with-secret
+# New deployments require no environment variables. On first browser open,
+# /setup records the public authority and creates the administrator after the
+# operator enters the one-time setup code emitted in the container log.
 
-# Required. Exact public authority accepted by DSH, without scheme, path or comma.
-# Use the actual public port when it is non-default, for example dsh.example.com:8443.
-DSH_TRUSTED_HOST=dsh.example.com
-
-# Optional explicit runtime values.
+# Optional runtime values.
 DSH_HOME=/data/dsh
 DSH_SERVER_HOME=/data/dsh-server
 WORKSPACE_ROOT=/workspace
@@ -202,20 +198,24 @@ DSH_PUBLIC_PORT=8080
 DSH_UI_PRESET=base
 ```
 
-启动器只在 `/data/dsh/auth/users.yaml` 尚无账号时要求管理员变量，并通过 Auth Bundle 自己的 `dsh-auth user add --password-stdin` 写入 bcrypt 哈希；后续启动可以不再提供明文密码。`DSH_TRUSTED_HOST` 每次启动都必须存在且通过 authority 格式校验。若 Auth Bundle 无法保护 WebSocket，或无法在反向代理下 fail-closed，则不准入；届时才评估最小认证适配层。
+浏览器不能持久改写 Coolify 的环境变量，因此向导保存的是 `/data/dsh-server/runtime-config.json`，其中只有公开 authority、schema 版本和时间；entrypoint 在每次启动时读取它并为 DSH/Caddy 导出 `DSH_TRUSTED_HOST`。一次性初始化码仅首次写入受限文件并打印一次；它不是管理员密码，完成初始化后立即删除。Auth Bundle 仍通过自己的 `dsh-auth user add --password-stdin` 写入 bcrypt 哈希。若 Auth Bundle 无法保护 WebSocket，或无法在反向代理下 fail-closed，则不准入；届时才评估最小认证适配层。
 
 ### 7.3 首次启动状态机
 
 ```text
 container start
   ↓
-validate secrets and directory ownership
-  ↓ failure → exit non-zero; do not start Caddy or DSH
+validate directory ownership
+  ↓ failure → exit non-zero; do not start setup server, Caddy or DSH
 create /data/dsh-server with 0700
   ↓
 web profile exists?
   ├─ yes → verify manifest and marker only
   └─ no  → atomically copy immutable seed profile
+  ↓
+runtime-config.json exists?
+  ├─ yes → validate persisted trustedHost
+  └─ no  → serve /setup :8080; require one-time code; create bcrypt admin; persist trustedHost
   ↓
 write non-sensitive state = starting
   ↓
@@ -228,7 +228,7 @@ start status server :9000 and Caddy :8080
 write state = ready and current release marker
 ```
 
-首次启动不生成或打印默认密码；认证 secret 缺失必须失败。这比把临时管理员密码写入 Docker log 更适合生产服务器。
+首次启动不生成默认密码。为防止第一个公网访问者抢占管理员，唯一可显示的初始化凭据是一串随机一次性码；它只供操作者从首启容器日志复制到 `/setup` 页面，完成后删除。管理员密码不进入日志、镜像或普通运行配置。
 
 ## 8. 公开接口与运行时合约
 
@@ -584,17 +584,17 @@ ghcr.io/<owner>/dsh-server-kit:sha-<git-sha>
 
 1. 从 Git Repository 选择 Dockerfile；
 2. 仅发布容器端口 `8080`；
-3. 在 Coolify Secret 设置 `DSH_TRUSTED_HOST`；第一次部署另设 `DSH_ADMIN_USERNAME`、`DSH_ADMIN_PASSWORD`，确认已创建账号后可移除后两项；
-4. 创建 `/data/dsh`、`/data/dsh-server`、`/workspace` 三个 Volume；
-5. 配置 HTTPS 域名；
-6. 部署后等待 `/readyz`，再通过浏览器登录；
+3. 创建 `/data/dsh`、`/data/dsh-server`、`/workspace` 三个 Volume；
+4. 配置 HTTPS 域名；
+5. 首次部署后，在容器日志复制一次性初始化码，访问 `/setup` 创建管理员并确认域名；
+6. 等待 `/readyz`，再通过浏览器登录；
 7. 第一次升级前创建 Volume Snapshot，并记录当前 image digest。
 
 ### 16.3 日志与诊断
 
 容器日志只记录 timestamp、event、image digest、DSH / auth / UI preset 的精确版本、readiness 与非敏感失败码。
 
-不得记录 URL query、Cookie、Authorization、密码、模型 Key、请求 body、工作区文件名或完整异常栈。详细诊断只可在容器内受限路径读取。
+不得记录 URL query、Cookie、Authorization、密码、模型 Key、请求 body、工作区文件名或完整异常栈。唯一例外是首次初始化的一次性 setup code：它只打印一次，完成配置后立即失效；详细诊断只可在容器内受限路径读取。
 
 ## 17. 发布准入与已实现闭环
 
@@ -613,9 +613,9 @@ committed manifest + locks + digest
   ↓ Docker build (no runtime package install)
 immutable base/workbench seed profile + attestation
   ↓ first boot only
-validate DSH_TRUSTED_HOST + preflight profile integrity
+first-open setup code + persisted trustedHost + bcrypt admin
   ↓
-Auth Gate CLI receives first password on stdin and stores only bcrypt state
+entrypoint exports trustedHost + preflight profile integrity
   ↓
 DSH loopback + auth probe (auth/status 200 AND anonymous root 401)
   ↓

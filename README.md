@@ -29,30 +29,32 @@ HTTPS / Coolify / Traefik
                                                        └── Auth Gate: page + API + WS
 ```
 
-必须设置 `DSH_TRUSTED_HOST` 为一个准确的公开 authority，例如 `dsh.example.com` 或 `dsh.example.com:8443`。启动器把它传给 DSH 的 `--trusted-host`，而 Caddy 保留浏览器的 `Host` 供 DSH 自己的 browser-trust fence 验证。不要使用 `https://`、路径、通配符或多个域名。
+首次 Web 初始化会保存一个准确的公开 authority，例如 `dsh.example.com` 或 `dsh.example.com:8443`。启动器随后把它传给 DSH 的 `--trusted-host`，而 Caddy 保留浏览器的 `Host` 供 DSH 自己的 browser-trust fence 验证。不要使用 `https://`、路径、通配符或多个域名。
 
-Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`，因此健康检查、Coolify 域名和 `DSH_TRUSTED_HOST` 必须一致。
+Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。这个 authority 在首次 Web 初始化时持久化，之后由启动器自动提供给 DSH 与 Caddy，无需持续配置环境变量。
 
 端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。因此登录限流应同时在 Coolify/Traefik/Cloudflare 边缘配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
 
 ## 部署
 
-1. 复制 `.env.example` 到未提交的 `.env`，填写真实域名和首个管理员密码。
-2. 用 Coolify 的 Secret 保存 `DSH_ADMIN_PASSWORD`；不要把它提交到 Git。
-3. 为 `/data/dsh`、`/data/dsh-server`、`/workspace` 创建独立持久卷。
-4. 仅发布容器 `8080`，由 Coolify/Traefik 终止 HTTPS。
-5. 启动后等待 `GET /readyz` 返回 `200`，再在 HTTPS 域名登录。
+1. 为 `/data/dsh`、`/data/dsh-server`、`/workspace` 创建独立持久卷。
+2. 仅发布容器 `8080`，在 Coolify 配置 HTTPS 域名。
+3. 首次启动后，打开该 HTTPS 域名的 `/setup`；从首次容器日志复制一次性初始化码，输入域名、管理员用户名和密码。
+4. 向导会把域名与 bcrypt 用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
 
 本地构建命令：
 
 ```sh
-docker compose --env-file .env up --build -d
-curl http://127.0.0.1:8080/readyz
+docker compose up --build -d
+# 从 `docker compose logs dsh-server-kit` 取得初始化码，完成 /setup 后：
+curl -H 'Host: localhost:8080' http://127.0.0.1:8080/readyz
 ```
 
 直接 HTTP 只适合检查健康状态，不能用于登录：认证 Cookie 强制 `Secure`。生产必须在 HTTPS 后面运行。
 
-首次启动时，若 `/data/dsh/auth/users.yaml` 不存在，启动器要求 `DSH_ADMIN_USERNAME` 和 `DSH_ADMIN_PASSWORD`，通过 Auth Gate 自己的 CLI 和 stdin 创建 bcrypt 用户记录。密码不会写入镜像、Volume、状态端点或日志。账号创建成功后可从部署 Secret 中移除这两个变量；再次启动不会要求它们。
+首次启动不需要环境变量。启动器先生成一次性初始化码并以受限文件保存；它只在首次容器日志中出现一次。Web 向导必须提交该码，才会调用 Auth Gate 自己的 CLI、通过 stdin 创建 bcrypt 用户记录。密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的 bcrypt 记录和非敏感运行配置。
+
+浏览器不能安全、持久地改写 Coolify 的环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
 
 ## 预置与边界
 

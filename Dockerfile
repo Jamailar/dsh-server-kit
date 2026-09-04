@@ -54,5 +54,5 @@ ENV DSH_HOME=/data/dsh \
 EXPOSE 8080
 VOLUME ["/data/dsh", "/data/dsh-server", "/workspace"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8080/readyz', { headers: { Host: process.env.DSH_TRUSTED_HOST } }).then((res) => process.exit(res.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
+  CMD node -e "const fs = require('node:fs'); let headers = {}; try { headers = { Host: JSON.parse(fs.readFileSync('/data/dsh-server/runtime-config.json', 'utf8')).trustedHost }; } catch {} fetch('http://127.0.0.1:8080/healthz', { headers }).then((res) => process.exit(res.status === 200 ? 0 : 1)).catch(() => process.exit(1))"
 ENTRYPOINT ["/usr/bin/tini", "--", "/app/docker/entrypoint.sh"]

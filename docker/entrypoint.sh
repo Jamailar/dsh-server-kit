@@ -13,7 +13,9 @@ DSH_TRUSTED_HOST=${DSH_TRUSTED_HOST:-}
 APP_ROOT=${APP_ROOT:-/app}
 SEED_ROOT=${SEED_ROOT:-/opt/dsh-seed}
 RUNTIME_ROOT=${RUNTIME_ROOT:-/app/runtime}
-export DSH_HOME DSH_SERVER_HOME WORKSPACE_ROOT DSH_INTERNAL_PORT STATUS_PORT DSH_UI_PRESET DSH_TRUSTED_HOST APP_ROOT SEED_ROOT RUNTIME_ROOT
+RUNTIME_CONFIG_PATH=${RUNTIME_CONFIG_PATH:-$DSH_SERVER_HOME/runtime-config.json}
+SETUP_CODE_PATH=${SETUP_CODE_PATH:-$DSH_SERVER_HOME/setup-code}
+export DSH_HOME DSH_SERVER_HOME WORKSPACE_ROOT DSH_INTERNAL_PORT STATUS_PORT DSH_UI_PRESET DSH_TRUSTED_HOST APP_ROOT SEED_ROOT RUNTIME_ROOT RUNTIME_CONFIG_PATH SETUP_CODE_PATH
 
 fail() {
   printf '%s\n' "dsh-server-kit: $1" >&2
@@ -35,7 +37,7 @@ validate_port() {
 }
 
 validate_authority() {
-  [ -n "$DSH_TRUSTED_HOST" ] || fail 'DSH_TRUSTED_HOST is required'
+  [ -n "$DSH_TRUSTED_HOST" ] || fail 'trusted host is required after first-time setup'
   node -e '
     const value = process.argv[1]
     if (value.includes(",") || /\s/.test(value) || value.includes("/") || value.includes("@")) process.exit(1)
@@ -94,12 +96,82 @@ seed_admin_if_needed() {
   unset DSH_ADMIN_USERNAME
 }
 
+read_configured_host() {
+  [ -s "$RUNTIME_CONFIG_PATH" ] || return 1
+  node -e '
+    const config = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))
+    if (config.schemaVersion !== 1 || typeof config.trustedHost !== "string") process.exit(1)
+    process.stdout.write(config.trustedHost)
+  ' "$RUNTIME_CONFIG_PATH"
+}
+
+persist_trusted_host() {
+  run_as_dsh node -e '
+    const fs = require("node:fs")
+    const path = require("node:path")
+    const [configPath, trustedHost] = process.argv.slice(1)
+    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 })
+    const temporary = `${configPath}.${process.pid}.tmp`
+    fs.writeFileSync(temporary, `${JSON.stringify({ schemaVersion: 1, trustedHost, configuredAt: new Date().toISOString() })}\n`, { mode: 0o600, flag: "wx" })
+    fs.renameSync(temporary, configPath)
+  ' "$RUNTIME_CONFIG_PATH" "$DSH_TRUSTED_HOST"
+}
+
+run_initial_setup() {
+  run_as_dsh env \
+    SETUP_HOST=0.0.0.0 \
+    SETUP_PORT=8080 \
+    RUNTIME_CONFIG_PATH="$RUNTIME_CONFIG_PATH" \
+    SETUP_CODE_PATH="$SETUP_CODE_PATH" \
+    AUTH_GATE_CLI="$DSH_HOME/profiles/web/node_modules/dsh-auth-gate/lib/cli.js" \
+    node "$APP_ROOT/src/setup-server.mjs" &
+  BOOTSTRAP_PID=$!
+  while [ ! -s "$RUNTIME_CONFIG_PATH" ]; do
+    kill -0 "$BOOTSTRAP_PID" 2>/dev/null || fail 'initial setup server stopped before configuration completed'
+    sleep 1
+  done
+  # Give the successful setup response time to reach the browser before the
+  # temporary listener is stopped and Caddy takes over the same port.
+  sleep 1
+  kill "$BOOTSTRAP_PID" 2>/dev/null || true
+  wait "$BOOTSTRAP_PID" 2>/dev/null || true
+  unset BOOTSTRAP_PID
+}
+
+resolve_trusted_host() {
+  persisted_host=''
+  if [ -s "$RUNTIME_CONFIG_PATH" ]; then
+    persisted_host=$(read_configured_host) || fail 'persisted runtime configuration is invalid'
+  fi
+
+  if [ -n "$DSH_TRUSTED_HOST" ] && [ -n "$persisted_host" ] && [ "$DSH_TRUSTED_HOST" != "$persisted_host" ]; then
+    fail 'DSH_TRUSTED_HOST differs from the persisted runtime configuration'
+  fi
+
+  if [ -z "$DSH_TRUSTED_HOST" ] && [ -n "$persisted_host" ]; then
+    DSH_TRUSTED_HOST=$persisted_host
+  fi
+
+  if [ -z "$DSH_TRUSTED_HOST" ]; then
+    [ ! -s "$DSH_HOME/auth/users.yaml" ] || fail 'runtime configuration is missing for an existing installation; set DSH_TRUSTED_HOST once to migrate it'
+    run_initial_setup
+    DSH_TRUSTED_HOST=$(read_configured_host) || fail 'initial setup did not write a valid runtime configuration'
+  fi
+  validate_authority
+  if [ ! -s "$RUNTIME_CONFIG_PATH" ]; then
+    persist_trusted_host || fail 'could not persist runtime configuration'
+  fi
+  export DSH_TRUSTED_HOST
+}
+
 stop_services() {
   trap - TERM INT EXIT
   write_runtime_state stopping || true
+  [ -n "${BOOTSTRAP_PID:-}" ] && kill "$BOOTSTRAP_PID" 2>/dev/null || true
   [ -n "${CADDY_PID:-}" ] && kill "$CADDY_PID" 2>/dev/null || true
   [ -n "${DSH_PID:-}" ] && kill "$DSH_PID" 2>/dev/null || true
   [ -n "${STATUS_PID:-}" ] && kill "$STATUS_PID" 2>/dev/null || true
+  [ -n "${BOOTSTRAP_PID:-}" ] && wait "$BOOTSTRAP_PID" 2>/dev/null || true
   [ -n "${CADDY_PID:-}" ] && wait "$CADDY_PID" 2>/dev/null || true
   [ -n "${DSH_PID:-}" ] && wait "$DSH_PID" 2>/dev/null || true
   [ -n "${STATUS_PID:-}" ] && wait "$STATUS_PID" 2>/dev/null || true
@@ -111,7 +183,6 @@ require_absolute_path "$WORKSPACE_ROOT" WORKSPACE_ROOT
 validate_port "$DSH_INTERNAL_PORT" DSH_INTERNAL_PORT
 validate_port "$STATUS_PORT" STATUS_PORT
 case "$DSH_UI_PRESET" in base|workbench) ;; *) fail 'DSH_UI_PRESET must be base or workbench' ;; esac
-validate_authority
 
 mkdir -p "$DSH_HOME" "$DSH_SERVER_HOME" "$WORKSPACE_ROOT"
 if [ "$(id -u)" -eq 0 ]; then
@@ -127,11 +198,12 @@ fi
 
 DSH_SERVER_RELEASE=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).release.version)' "$APP_ROOT/config/release-manifest.json")
 export DSH_SERVER_RELEASE
+trap stop_services TERM INT EXIT
+resolve_trusted_host
 run_as_dsh node "$APP_ROOT/scripts/preflight-upgrade.mjs" --home "$DSH_HOME" --preset "$DSH_UI_PRESET"
 seed_admin_if_needed
 
 write_runtime_state starting
-trap stop_services TERM INT EXIT
 cd "$WORKSPACE_ROOT"
 
 run_as_dsh "$RUNTIME_ROOT/node_modules/.bin/dsh" web \

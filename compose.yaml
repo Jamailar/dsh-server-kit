@@ -8,10 +8,8 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DSH_TRUSTED_HOST: ${DSH_TRUSTED_HOST:?Set the exact public authority, for example dsh.example.com}
-      DSH_ADMIN_USERNAME: ${DSH_ADMIN_USERNAME:-admin}
-      # Required only while /data/dsh/auth/users.yaml does not yet exist.
-      DSH_ADMIN_PASSWORD: ${DSH_ADMIN_PASSWORD:-}
+      # Optional. New deployments default to base and configure the domain and
+      # administrator through the first-open setup page.
       DSH_UI_PRESET: ${DSH_UI_PRESET:-base}
     volumes:
       - dsh-home:/data/dsh
