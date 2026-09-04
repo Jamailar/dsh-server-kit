@@ -5,6 +5,11 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const authGateRuntimePackages = {
+  '@deepseek-ai/cordis': '4.0.2',
+  '@deepseek-ai/dsh-invariants': '0.1.0-rc.8',
+  '@deepseek-ai/dsh-storage': '0.1.0-rc.8',
+}
 
 function option(name) {
   const index = process.argv.indexOf(name)
@@ -63,6 +68,9 @@ async function verifyProfile({ preset, profileDir, manifest }) {
 
   const authVersion = manifest.runtime?.authGate?.version
   if (expectedPackages['dsh-auth-gate'] !== authVersion) throw new Error('preset and release manifest disagree about auth gate version')
+  for (const [name, version] of Object.entries(authGateRuntimePackages)) {
+    if (expectedPackages[name] !== version) throw new Error(`${preset} preset does not close the Auth Gate runtime dependency ${name}@${version}`)
+  }
 
   return {
     schemaVersion: 1,

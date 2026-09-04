@@ -37,6 +37,9 @@
     "base": {
       "profile": "web",
       "packages": {
+        "@deepseek-ai/cordis": "4.0.2",
+        "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+        "@deepseek-ai/dsh-storage": "0.1.0-rc.8",
         "dsh-auth-gate": "0.12.0"
       },
       "bundles": [
@@ -48,6 +51,9 @@
     "workbench": {
       "profile": "web",
       "packages": {
+        "@deepseek-ai/cordis": "4.0.2",
+        "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+        "@deepseek-ai/dsh-storage": "0.1.0-rc.8",
         "dsh-auth-gate": "0.12.0",
         "dsh-better-sidebar": "0.18.0"
       },

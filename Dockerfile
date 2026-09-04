@@ -21,6 +21,9 @@ COPY scripts/build-seed-profile.mjs /app/scripts/build-seed-profile.mjs
 COPY scripts/brand-auth-gate-login.mjs /app/scripts/brand-auth-gate-login.mjs
 RUN pnpm --dir /opt/dsh-seed/base install --frozen-lockfile --prod \
  && pnpm --dir /opt/dsh-seed/workbench install --frozen-lockfile --prod \
+ && auth_smoke_home="$(mktemp -d)" \
+ && printf '%s\n' 'build-only-auth-gate-password' | DSH_HOME="$auth_smoke_home" node /opt/dsh-seed/base/node_modules/dsh-auth-gate/lib/cli.js user add build-smoke --password-stdin \
+ && test -s "$auth_smoke_home/auth/users.yaml" \
  && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/base \
  && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/workbench \
  && node /app/scripts/build-seed-profile.mjs --preset base --profile /opt/dsh-seed/base \

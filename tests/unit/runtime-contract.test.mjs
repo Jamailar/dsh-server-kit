@@ -350,6 +350,9 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   assert.equal(manifest.runtime.dsh.version, '0.1.2-rc.1')
   assert.equal(manifest.runtime.authGate.version, '0.12.0')
   assert.equal(manifest.presets.base.packages['dsh-auth-gate'], manifest.runtime.authGate.version)
+  assert.equal(manifest.presets.base.packages['@deepseek-ai/cordis'], '4.0.2')
+  assert.equal(manifest.presets.base.packages['@deepseek-ai/dsh-invariants'], '0.1.0-rc.8')
+  assert.equal(manifest.presets.base.packages['@deepseek-ai/dsh-storage'], '0.1.0-rc.8')
   assert.equal(manifest.presets.workbench.packages['dsh-better-sidebar'], manifest.runtime.betterSidebar.version)
 
   const caddyfile = await readFile(new URL('config/Caddyfile', projectRoot), 'utf8')
@@ -364,4 +367,10 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   assert.match(setupServer, /password-stdin/)
   assert.match(setupServer, /DSH_SETUP_PROTECTION/)
   assert.match(setupServer, /initial_setup_required/)
+
+  const dockerfile = await readFile(new URL('Dockerfile', projectRoot), 'utf8')
+  assert.match(dockerfile, /dsh-auth-gate\/lib\/cli\.js user add build-smoke --password-stdin/)
+  const entrypoint = await readFile(new URL('docker/entrypoint.sh', projectRoot), 'utf8')
+  assert.match(entrypoint, /repair_seed_profile_if_needed/)
+  assert.match(entrypoint, /seed_profile_dependencies_repaired/)
 })

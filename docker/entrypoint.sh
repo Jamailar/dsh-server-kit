@@ -84,6 +84,36 @@ copy_seed_profile() {
   mv "$seed_tmp" "$profile_dir"
 }
 
+repair_seed_profile_if_needed() {
+  profile_dir="$DSH_HOME/profiles/web"
+  seed_dir="$SEED_ROOT/$DSH_UI_PRESET"
+  [ -d "$profile_dir" ] || fail 'seed profile is missing after initialization'
+
+  profile_changed=0
+  for managed_file in package.json pnpm-lock.yaml cordis.patch.yml pnpm-workspace.yaml server-kit-profile.json; do
+    [ -r "$seed_dir/$managed_file" ] || fail "seed profile is missing $managed_file"
+    if ! cmp -s "$profile_dir/$managed_file" "$seed_dir/$managed_file"; then
+      profile_changed=1
+      break
+    fi
+  done
+  for required_package in dsh-auth-gate @deepseek-ai/cordis @deepseek-ai/dsh-invariants @deepseek-ai/dsh-storage; do
+    if [ ! -e "$profile_dir/node_modules/$required_package" ]; then
+      profile_changed=1
+      break
+    fi
+  done
+  [ "$profile_changed" -eq 1 ] || return 0
+
+  [ -d "$seed_dir/node_modules" ] || fail 'seed profile dependencies are missing'
+  mkdir -p "$profile_dir/node_modules"
+  cp -a "$seed_dir/node_modules/." "$profile_dir/node_modules/"
+  for managed_file in package.json pnpm-lock.yaml cordis.patch.yml pnpm-workspace.yaml server-kit-profile.json; do
+    cp -a "$seed_dir/$managed_file" "$profile_dir/$managed_file"
+  done
+  printf '%s\n' "{\"event\":\"seed_profile_dependencies_repaired\",\"preset\":\"$DSH_UI_PRESET\"}"
+}
+
 brand_auth_gate_login() {
   run_as_dsh node "$APP_ROOT/scripts/brand-auth-gate-login.mjs" --profile "$DSH_HOME/profiles/web"
 }
@@ -199,6 +229,7 @@ fi
 [ -w "$DSH_HOME" ] && [ -w "$DSH_SERVER_HOME" ] && [ -w "$WORKSPACE_ROOT" ] || fail 'persistent paths must be writable by the dsh runtime user'
 
 copy_seed_profile
+repair_seed_profile_if_needed
 if [ "$(id -u)" -eq 0 ]; then
   chown -R dsh:dsh "$DSH_HOME/profiles" "$DSH_HOME/auth" 2>/dev/null || chown -R dsh:dsh "$DSH_HOME/profiles"
 fi

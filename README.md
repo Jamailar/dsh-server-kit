@@ -116,6 +116,8 @@ docker rm dsh-server-kit
 
 启动器会在不改写用户 Profile 的前提下检查版本组合；`/readyz` 未通过时，应切回上一个镜像标签并继续使用原 `dsh-data` Volume。
 
+升级镜像时，启动器只会在镜像的受管理 Profile 声明发生变化时，从新镜像复制预构建的 `node_modules`、锁文件和 Profile 元数据到 `/data/dsh/profiles/web`；它不会在运行时执行包安装或下载，也不会改写 `/data/dsh` 里的管理员、会话、模型配置或 `/data/workspace`。这一步会自动修复早期镜像遗漏的 Auth Gate 依赖。
+
 浏览器不能安全、持久地改写部署环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
 
 ## 预置与边界
