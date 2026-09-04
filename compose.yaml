@@ -11,6 +11,8 @@ services:
       # Optional. New deployments default to base and configure the domain and
       # administrator through the first-open setup page.
       DSH_UI_PRESET: ${DSH_UI_PRESET:-base}
+      # Optional. Use code to require a setup code from the first container log.
+      DSH_SETUP_PROTECTION: ${DSH_SETUP_PROTECTION:-open}
     volumes:
       - dsh-home:/data/dsh
       - dsh-server:/data/dsh-server

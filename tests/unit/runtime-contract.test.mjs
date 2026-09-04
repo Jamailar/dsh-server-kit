@@ -42,6 +42,20 @@ async function waitForHttp(port, path, expectedStatus) {
   throw new Error(`timed out waiting for ${path}`)
 }
 
+async function createFakeAuthCli(stateDir) {
+  const authCli = join(stateDir, 'fake-auth-cli.mjs')
+  await writeFile(authCli, `
+    import { mkdir, writeFile } from 'node:fs/promises'
+    import { join } from 'node:path'
+    let password = ''
+    for await (const chunk of process.stdin) password += chunk
+    if (process.argv[2] !== 'user' || process.argv[3] !== 'add' || password.trim() === '') process.exit(1)
+    await mkdir(join(process.env.DSH_HOME, 'auth'), { recursive: true })
+    await writeFile(join(process.env.DSH_HOME, 'auth', 'users.yaml'), 'user: ' + process.argv[4] + '\\nhash: delegated-by-auth-gate\\n')
+  `)
+  return authCli
+}
+
 test('auth readiness probe requires a mounted public status endpoint and a denied protected request', async () => {
   const upstream = createServer((req, res) => {
     if (req.url === '/auth/status') {
@@ -93,25 +107,15 @@ test('status server keeps health public and does not claim readiness when DSH is
   assert.equal('path' in version.body, false)
 })
 
-test('first-open setup persists only public runtime configuration and delegates user creation to Auth Gate', async (t) => {
+test('code-protected first-open setup persists only public runtime configuration and delegates user creation to Auth Gate', async (t) => {
   const stateDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-setup-'))
   const dshHome = join(stateDir, 'dsh')
   const configPath = join(stateDir, 'runtime-config.json')
   const setupCodePath = join(stateDir, 'setup-code')
-  const authCli = join(stateDir, 'fake-auth-cli.mjs')
+  const authCli = await createFakeAuthCli(stateDir)
   const port = await availablePort()
 
   await mkdir(dshHome, { recursive: true })
-  await writeFile(authCli, `
-    import { mkdir, writeFile } from 'node:fs/promises'
-    import { join } from 'node:path'
-    let password = ''
-    for await (const chunk of process.stdin) password += chunk
-    if (process.argv[2] !== 'user' || process.argv[3] !== 'add' || password.trim() === '') process.exit(1)
-    await mkdir(join(process.env.DSH_HOME, 'auth'), { recursive: true })
-    await writeFile(join(process.env.DSH_HOME, 'auth', 'users.yaml'), 'user: ' + process.argv[4] + '\\nhash: delegated-by-auth-gate\\n')
-  `)
-
   const child = spawn(process.execPath, ['src/setup-server.mjs'], {
     cwd: new URL('.', projectRoot),
     env: {
@@ -122,6 +126,7 @@ test('first-open setup persists only public runtime configuration and delegates 
       RUNTIME_CONFIG_PATH: configPath,
       SETUP_CODE_PATH: setupCodePath,
       AUTH_GATE_CLI: authCli,
+      DSH_SETUP_PROTECTION: 'code',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -151,6 +156,49 @@ test('first-open setup persists only public runtime configuration and delegates 
   await assert.rejects(unlink(setupCodePath), { code: 'ENOENT' })
 })
 
+test('default first-open setup accepts an email administrator and does not expose a setup code', async (t) => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-open-setup-'))
+  const dshHome = join(stateDir, 'dsh')
+  const configPath = join(stateDir, 'runtime-config.json')
+  const setupCodePath = join(stateDir, 'setup-code')
+  const authCli = await createFakeAuthCli(stateDir)
+  const port = await availablePort()
+
+  await mkdir(dshHome, { recursive: true })
+  const child = spawn(process.execPath, ['src/setup-server.mjs'], {
+    cwd: new URL('.', projectRoot),
+    env: {
+      ...process.env,
+      SETUP_HOST: '127.0.0.1',
+      SETUP_PORT: String(port),
+      DSH_HOME: dshHome,
+      RUNTIME_CONFIG_PATH: configPath,
+      SETUP_CODE_PATH: setupCodePath,
+      AUTH_GATE_CLI: authCli,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  t.after(() => child.kill('SIGTERM'))
+
+  const setupPage = await waitForHttp(port, '/setup', 200)
+  assert.doesNotMatch(await setupPage.text(), /一次性初始化码/)
+  await assert.rejects(readFile(setupCodePath, 'utf8'), { code: 'ENOENT' })
+
+  const body = new URLSearchParams({
+    trustedHost: 'dsh.example.com',
+    username: 'admin@example.com',
+    password: 'a-long-test-password',
+    passwordConfirm: 'a-long-test-password',
+  })
+  const response = await fetch(`http://127.0.0.1:${port}/setup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  assert.equal(response.status, 202)
+  assert.match(await readFile(join(dshHome, 'auth', 'users.yaml'), 'utf8'), /user: admin@example\.com/)
+})
+
 test('release manifest, seed locks, and Caddy trust boundary are internally consistent', async () => {
   const manifest = JSON.parse(await readFile(new URL('config/release-manifest.json', projectRoot), 'utf8'))
   assert.equal(manifest.runtime.dsh.version, '0.1.2-rc.1')
@@ -167,5 +215,6 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
   const setupServer = await readFile(new URL('src/setup-server.mjs', projectRoot), 'utf8')
   assert.match(setupServer, /timingSafeEqual/)
   assert.match(setupServer, /password-stdin/)
+  assert.match(setupServer, /DSH_SETUP_PROTECTION/)
   assert.match(setupServer, /initial_setup_required/)
 })

@@ -22,21 +22,17 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 
-setup_code=''
-for _ in $(seq 1 30); do
-  setup_code=$(docker logs "$container_name" 2>&1 | sed -n -E 's/.*"setupCode":"([^"]+)".*/\1/p' | head -n 1)
-  [ -n "$setup_code" ] && break
-  sleep 1
-done
-test -n "$setup_code"
+if docker logs "$container_name" 2>&1 | grep -F '"setupCode"' >/dev/null; then
+  echo 'default setup unexpectedly exposed a setup code' >&2
+  exit 1
+fi
 
 curl --silent --show-error --fail \
   -H "Host: localhost:${host_port}" \
   --data-urlencode "trustedHost=localhost:${host_port}" \
-  --data-urlencode 'username=admin' \
+  --data-urlencode 'username=admin@example.com' \
   --data-urlencode 'password=ci-only-not-a-production-secret' \
   --data-urlencode 'passwordConfirm=ci-only-not-a-production-secret' \
-  --data-urlencode "setupCode=${setup_code}" \
   --output /dev/null \
   "http://127.0.0.1:${host_port}/setup"
 

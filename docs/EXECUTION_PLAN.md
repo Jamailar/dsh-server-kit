@@ -57,7 +57,7 @@ DSH Server Kit = 可复现、安全、可运维的 DSH 服务器装配与兼容�
 | 模块 | 具体职责 | 不承担的职责 |
 | --- | --- | --- |
 | `docker/entrypoint.sh` | 校验输入、初始化 Volume、拷贝 seed Profile、读取持久化运行配置、启动和停止子进程 | 不在运行时从 npm / GitHub 下载插件。 |
-| `src/setup-server.mjs` | 仅在未初始化时提供 `/setup`、验证一次性码、调用 Auth Gate CLI 并原子写入非敏感配置 | 不代理 DSH、不实现密码哈希、会话或通用管理后台。 |
+| `src/setup-server.mjs` | 仅在未初始化时提供 `/setup`、接受用户名或邮箱、按需验证一次性码、调用 Auth Gate CLI 并原子写入非敏感配置 | 不代理 DSH、不实现密码哈希、会话或通用管理后台。 |
 | `src/status-server.mjs` | loopback `/healthz`、`/readyz`、`/versionz`，读取非敏感运行状态 | 不代理 DSH，不保存用户和会话。 |
 | `config/Caddyfile` | 只暴露 :8080；路由状态端点并反代其它请求 | 不做认证、不保存状态、不签发 TLS。 |
 | `scripts/build-seed-profile.mjs` | 从 release manifest 生成可复现 base / workbench Profile 与锁文件 | 不扫描或修复用户任意插件。 |
@@ -117,7 +117,7 @@ Coolify / Traefik
 
 1. Coolify / Traefik 终止 TLS；容器只接受 :8080 请求。
 2. Docker 只发布 `8080`；`3080` 和 `9000` 永不发布。
-3. 新实例先启动最小的 `/setup` 服务器；管理员以一次性初始化码在浏览器提交公开 authority 与账户。配置持久化后，Caddy 才以该 authority 拒绝任意其它 `Host`，并只连接 `127.0.0.1:3080`、保留该公开 Host；启动 DSH 时将同一个、经配置验证的 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此做第二次验证；绝不将 Host 改写为 loopback 来绕过该栅栏。
+3. 新实例先启动最小的 `/setup` 服务器；管理员在浏览器提交公开 authority 与用户名或邮箱。默认 `open` 模式不显示一次性码；显式设为 `code` 时才验证首启日志的一次性码。配置持久化后，Caddy 才以该 authority 拒绝任意其它 `Host`，并只连接 `127.0.0.1:3080`、保留该公开 Host；启动 DSH 时将同一个、经配置验证的 authority 传入重复的 `--trusted-host` 参数。DSH 自己的浏览器信任栅栏据此做第二次验证；绝不将 Host 改写为 loopback 来绕过该栅栏。
 4. Auth Bundle 在 DSH 路由层拦截页面、`/api/*`、WebSocket upgrade、SSE 和未来路由。
 5. UI Bundle 不得监听额外公网端口。Tunnel、SSH、remote API 或后台定时运行默认关闭，除非单独准入。
 6. 容器以专用非 root 用户运行；持久化目录最小权限为 `0700`；密码和 API Key 不进入镜像、日志或 manifest。
@@ -185,9 +185,8 @@ Server Kit 不运行 `dsh plugin add ...@latest`，也不调用 UI Bundle 的一
 ### 7.2 环境变量
 
 ```dotenv
-# New deployments require no environment variables. On first browser open,
-# /setup records the public authority and creates the administrator after the
-# operator enters the one-time setup code emitted in the container log.
+# New deployments require no environment variables. /setup records the public
+# authority and creates the administrator on first browser open.
 
 # Optional runtime values.
 DSH_HOME=/data/dsh
@@ -196,9 +195,13 @@ WORKSPACE_ROOT=/workspace
 DSH_INTERNAL_PORT=3080
 DSH_PUBLIC_PORT=8080
 DSH_UI_PRESET=base
+
+# Optional. Default open hides setup-code input. Set code to require a random
+# one-time code from the first container log before the administrator is made.
+DSH_SETUP_PROTECTION=open
 ```
 
-浏览器不能持久改写 Coolify 的环境变量，因此向导保存的是 `/data/dsh-server/runtime-config.json`，其中只有公开 authority、schema 版本和时间；entrypoint 在每次启动时读取它并为 DSH/Caddy 导出 `DSH_TRUSTED_HOST`。一次性初始化码仅首次写入受限文件并打印一次；它不是管理员密码，完成初始化后立即删除。Auth Bundle 仍通过自己的 `dsh-auth user add --password-stdin` 写入 bcrypt 哈希。若 Auth Bundle 无法保护 WebSocket，或无法在反向代理下 fail-closed，则不准入；届时才评估最小认证适配层。
+浏览器不能持久改写 Coolify 的环境变量，因此向导保存的是 `/data/dsh-server/runtime-config.json`，其中只有公开 authority、schema 版本和时间；entrypoint 在每次启动时读取它并为 DSH/Caddy 导出 `DSH_TRUSTED_HOST`。默认 `open` 模式无初始化码；`code` 模式才首次写入受限文件并打印一次，完成初始化后立即删除。它不是管理员密码。`open` 模式必须在首个访问者受控时使用；若域名已公开，生产必须改用 `code`。Auth Bundle 仍通过自己的 `dsh-auth user add --password-stdin` 写入 bcrypt 哈希。若 Auth Bundle 无法保护 WebSocket，或无法在反向代理下 fail-closed，则不准入；届时才评估最小认证适配层。
 
 ### 7.3 首次启动状态机
 
@@ -215,7 +218,8 @@ web profile exists?
   ↓
 runtime-config.json exists?
   ├─ yes → validate persisted trustedHost
-  └─ no  → serve /setup :8080; require one-time code; create bcrypt admin; persist trustedHost
+  └─ no  → serve /setup :8080; accept username or email; create bcrypt admin; persist trustedHost
+             └─ DSH_SETUP_PROTECTION=code only: require one-time code
   ↓
 write non-sensitive state = starting
   ↓
@@ -228,7 +232,7 @@ start status server :9000 and Caddy :8080
 write state = ready and current release marker
 ```
 
-首次启动不生成默认密码。为防止第一个公网访问者抢占管理员，唯一可显示的初始化凭据是一串随机一次性码；它只供操作者从首启容器日志复制到 `/setup` 页面，完成后删除。管理员密码不进入日志、镜像或普通运行配置。
+首次启动不生成默认密码。默认 `open` 模式没有额外初始化凭据，因此必须让首个 `/setup` 访问者受控。`code` 模式会生成随机一次性码，仅供操作者从首启容器日志复制到 `/setup` 页面，完成后删除。管理员密码不进入日志、镜像或普通运行配置。
 
 ## 8. 公开接口与运行时合约
 
@@ -586,7 +590,7 @@ ghcr.io/<owner>/dsh-server-kit:sha-<git-sha>
 2. 仅发布容器端口 `8080`；
 3. 创建 `/data/dsh`、`/data/dsh-server`、`/workspace` 三个 Volume；
 4. 配置 HTTPS 域名；
-5. 首次部署后，在容器日志复制一次性初始化码，访问 `/setup` 创建管理员并确认域名；
+5. 首次部署后，访问 `/setup` 创建管理员（用户名或邮箱）并确认域名；若域名已公开，设置可选变量 `DSH_SETUP_PROTECTION=code` 后再从首启日志复制一次性码；
 6. 等待 `/readyz`，再通过浏览器登录；
 7. 第一次升级前创建 Volume Snapshot，并记录当前 image digest。
 
@@ -594,7 +598,7 @@ ghcr.io/<owner>/dsh-server-kit:sha-<git-sha>
 
 容器日志只记录 timestamp、event、image digest、DSH / auth / UI preset 的精确版本、readiness 与非敏感失败码。
 
-不得记录 URL query、Cookie、Authorization、密码、模型 Key、请求 body、工作区文件名或完整异常栈。唯一例外是首次初始化的一次性 setup code：它只打印一次，完成配置后立即失效；详细诊断只可在容器内受限路径读取。
+不得记录 URL query、Cookie、Authorization、密码、模型 Key、请求 body、工作区文件名或完整异常栈。仅在显式 `code` 初始化保护模式下，随机 setup code 是例外：它只打印一次，完成配置后立即失效；详细诊断只可在容器内受限路径读取。
 
 ## 17. 发布准入与已实现闭环
 
@@ -613,7 +617,7 @@ committed manifest + locks + digest
   ↓ Docker build (no runtime package install)
 immutable base/workbench seed profile + attestation
   ↓ first boot only
-first-open setup code + persisted trustedHost + bcrypt admin
+first-open setup (optional code) + persisted trustedHost + bcrypt admin
   ↓
 entrypoint exports trustedHost + preflight profile integrity
   ↓

@@ -39,20 +39,22 @@ Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。�
 
 1. 为 `/data/dsh`、`/data/dsh-server`、`/workspace` 创建独立持久卷。
 2. 仅发布容器 `8080`，在 Coolify 配置 HTTPS 域名。
-3. 首次启动后，打开该 HTTPS 域名的 `/setup`；从首次容器日志复制一次性初始化码，输入域名、管理员用户名和密码。
+3. 首次启动后，打开该 HTTPS 域名的 `/setup`，输入域名、管理员用户名或邮箱和密码。
 4. 向导会把域名与 bcrypt 用户记录写入持久卷，然后自动启动 DSH。等待 `GET /readyz` 返回 `200` 后登录。
 
 本地构建命令：
 
 ```sh
 docker compose up --build -d
-# 从 `docker compose logs dsh-server-kit` 取得初始化码，完成 /setup 后：
+# 完成 /setup 后：
 curl -H 'Host: localhost:8080' http://127.0.0.1:8080/readyz
 ```
 
 直接 HTTP 只适合检查健康状态，不能用于登录：认证 Cookie 强制 `Secure`。生产必须在 HTTPS 后面运行。
 
-首次启动不需要环境变量。启动器先生成一次性初始化码并以受限文件保存；它只在首次容器日志中出现一次。Web 向导必须提交该码，才会调用 Auth Gate 自己的 CLI、通过 stdin 创建 bcrypt 用户记录。密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的 bcrypt 记录和非敏感运行配置。
+首次启动不需要环境变量，默认初始化页面也不显示一次性码。Web 向导通过 Auth Gate 自己的 CLI、使用 stdin 创建 bcrypt 用户记录；密码不会写入镜像、状态端点或日志；持久卷只保存 Auth Gate 的 bcrypt 记录和非敏感运行配置。
+
+`DSH_SETUP_PROTECTION=code` 会重新启用保留在镜像内的一次性初始化码机制：代码只出现在首次容器日志，完成后删除。默认 `open` 模式应只在首次访问受控（例如先不公开 DNS 或限制平台访问）的部署中使用；如果域名已公开，任何第一个访问 `/setup` 的人都可创建管理员，生产部署应改用 `code` 模式。
 
 浏览器不能安全、持久地改写 Coolify 的环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
 

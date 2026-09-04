@@ -49,7 +49,8 @@ ENV DSH_HOME=/data/dsh \
     WORKSPACE_ROOT=/workspace \
     DSH_INTERNAL_PORT=3080 \
     STATUS_PORT=9000 \
-    DSH_UI_PRESET=base
+    DSH_UI_PRESET=base \
+    DSH_SETUP_PROTECTION=open
 
 EXPOSE 8080
 VOLUME ["/data/dsh", "/data/dsh-server", "/workspace"]
