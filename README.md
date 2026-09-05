@@ -140,39 +140,15 @@ docker rm dsh-server-kit
 
 浏览器不能安全、持久地改写部署环境变量；因此向导保存的是 `/data/dsh-server/runtime-config.json`。之后的启动由 entrypoint 读取该文件并把可信域名传给 DSH/Caddy，达到“不再需要部署变量”的效果。已有旧部署若尚无此配置，可以保留一次 `DSH_TRUSTED_HOST` 启动后迁移；其值必须与持久化域名完全一致。
 
-## 预置与边界
+## 支持的 Preset
 
-`DSH_UI_PRESET` 是部署级启动配置，而不是网页内的即时开关。它决定 DSH 启动时装载的锁定依赖、Profile Bundle 和页面模块；一次容器启动只能选择一个预置。未设置时默认使用 `base`。
+使用 `DSH_UI_PRESET=<名称>` 选择预置；未设置时默认 `base`。切换后重建容器并继续挂载同一个 `/data` Volume。
 
-| 值 | 界面与定位 | 来源仓库 | 状态 |
-| --- | --- | --- | --- |
-| `base`（默认） | 官方 DSH Web UI + 密码登录 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)、[dsh-auth-gate](https://github.com/zephaniahwang94-cmyk/dsh-auth-gate) | 默认、最小预置 |
-| `workbench` | `base` 加上文件、编辑、终端、Git 和浏览器侧边栏工作台 | [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)；同时复用 `base` 的两个来源 | 已锁定构建；尚未完成完整浏览器功能验收，不标为生产支持 |
-| `trading` | 加密货币、美股、A 股、港股交易工作台 | [dsh-trading](https://github.com/zhu1090093659/dsh-trading)；同时复用 `base` 的两个来源 | 已集成；受 PolyForm Noncommercial 1.0.0 非商业许可约束 |
-
-`dsh-web-all` 不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
-
-### 切换 Preset
-
-切换预置需要修改容器环境变量并**重建容器**；不能在已打开的网页内即时切换。原因是切换会更换 DSH 的启动依赖与 UI 模块，必须由一个完整的新进程加载。切换时使用同一个 `/data` Volume，管理员、模型配置、工作区和各预置的数据都会保留。
-
-例如，切换到 Trading：
-
-```sh
-docker stop dsh-server-kit
-docker rm dsh-server-kit
-docker run --detach \
-  --name dsh-server-kit \
-  --restart unless-stopped \
-  --publish 127.0.0.1:8080:8080 \
-  --volume dsh-data:/data \
-  --env DSH_UI_PRESET=trading \
-  dsh-server-kit:latest
-```
-
-切回默认界面时，移除 `--env DSH_UI_PRESET=trading`，或显式改成 `--env DSH_UI_PRESET=base`，然后用同一个 `/data` Volume 重建容器。切换到 `workbench` 时将值改为 `workbench`。先备份 `/data`，不要让两个容器同时写同一个 Volume。
-
-新预置也遵循此模型：先在镜像中以精确版本集成、锁定依赖并通过验证，才可以使用 `DSH_UI_PRESET=<名称>` 启动；任意输入一个社区包名不会让容器在运行时自动安装它。
+| Preset | 用途 | 来源仓库 |
+| --- | --- | --- |
+| `base`（默认） | 官方 DSH Web UI | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) · [dsh-auth-gate](https://github.com/zephaniahwang94-cmyk/dsh-auth-gate) |
+| `workbench` | 文件、编辑、终端、Git 与浏览器侧边栏 | [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) |
+| `trading` | 加密货币、美股、A 股、港股交易工作台 | [dsh-trading](https://github.com/zhu1090093659/dsh-trading) |
 
 ### 启用 Trading
 
