@@ -69,7 +69,14 @@ async function verifyProfile({ preset, profileDir, manifest }) {
   const authVersion = manifest.runtime?.authGate?.version
   if (expectedPackages['dsh-auth-gate'] !== authVersion) throw new Error('preset and release manifest disagree about auth gate version')
   for (const [name, version] of Object.entries(authGateRuntimePackages)) {
-    if (expectedPackages[name] !== version) throw new Error(`${preset} preset does not close the Auth Gate runtime dependency ${name}@${version}`)
+    const requiredVersion = preset === 'trading' && name.startsWith('@deepseek-ai/dsh-') ? manifest.runtime.dsh.version : version
+    if (expectedPackages[name] !== requiredVersion) throw new Error(`${preset} preset does not close the Auth Gate runtime dependency ${name}@${requiredVersion}`)
+  }
+  if (preset === 'trading') {
+    if (expectedPackages['@deepseek-ai/dsh'] !== manifest.runtime.dsh.version) throw new Error('Trading must use the locked DSH runtime version')
+    // Fail the build if upstream ranges silently introduce a second host API.
+    const versions = [...lock.matchAll(/^  '@deepseek-ai\/dsh(?:-[^@']+)?@([^']+)':/gm)]
+    if (versions.some((match) => match[1].split('(')[0] !== manifest.runtime.dsh.version)) throw new Error('Trading lockfile contains incompatible DSH versions')
   }
 
   return {
@@ -103,7 +110,7 @@ if (verifyOnly) {
   process.exit(0)
 }
 
-if (!selectedPreset || !profileArgument) throw new Error('usage: build-seed-profile.mjs --preset <base|workbench> --profile <directory>')
+if (!selectedPreset || !profileArgument) throw new Error('usage: build-seed-profile.mjs --preset <base|workbench|trading> --profile <directory>')
 if (!(selectedPreset in (manifest.presets ?? {}))) throw new Error(`unknown preset: ${selectedPreset}`)
 
 const attestation = await verifyProfile({ preset: selectedPreset, profileDir: resolve(profileArgument), manifest })

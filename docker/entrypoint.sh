@@ -106,8 +106,22 @@ repair_seed_profile_if_needed() {
   [ "$profile_changed" -eq 1 ] || return 0
 
   [ -d "$seed_dir/node_modules" ] || fail 'seed profile dependencies are missing'
-  mkdir -p "$profile_dir/node_modules"
-  cp -a "$seed_dir/node_modules/." "$profile_dir/node_modules/"
+  # A preset switch must replace the managed dependency tree, not merge it:
+  # stale Trading/DSH peers would otherwise continue shadowing the new preset.
+  staged_deps="$profile_dir/.server-kit-node_modules.$$.tmp"
+  previous_deps="$profile_dir/.server-kit-node_modules.$$.previous"
+  [ ! -e "$staged_deps" ] && [ ! -e "$previous_deps" ] || fail 'unexpected dependency staging path exists'
+  cp -a "$seed_dir/node_modules" "$staged_deps"
+  if [ -e "$profile_dir/node_modules" ]; then
+    mv "$profile_dir/node_modules" "$previous_deps"
+  fi
+  if ! mv "$staged_deps" "$profile_dir/node_modules"; then
+    [ ! -e "$previous_deps" ] || mv "$previous_deps" "$profile_dir/node_modules"
+    fail 'could not activate seed dependencies'
+  fi
+  # Only the old, distribution-managed dependencies are removed, never user
+  # accounts, settings, trading data or workspace files.
+  [ ! -e "$previous_deps" ] || rm -rf -- "$previous_deps"
   for managed_file in package.json pnpm-lock.yaml cordis.patch.yml pnpm-workspace.yaml server-kit-profile.json; do
     cp -a "$seed_dir/$managed_file" "$profile_dir/$managed_file"
   done
@@ -218,7 +232,7 @@ require_absolute_path "$DSH_SERVER_HOME" DSH_SERVER_HOME
 require_absolute_path "$WORKSPACE_ROOT" WORKSPACE_ROOT
 validate_port "$DSH_INTERNAL_PORT" DSH_INTERNAL_PORT
 validate_port "$STATUS_PORT" STATUS_PORT
-case "$DSH_UI_PRESET" in base|workbench) ;; *) fail 'DSH_UI_PRESET must be base or workbench' ;; esac
+case "$DSH_UI_PRESET" in base|workbench|trading) ;; *) fail 'DSH_UI_PRESET must be base, workbench or trading' ;; esac
 case "$DSH_SETUP_PROTECTION" in open|code) ;; *) fail 'DSH_SETUP_PROTECTION must be open or code' ;; esac
 
 mkdir -p "$DSH_HOME" "$DSH_SERVER_HOME" "$WORKSPACE_ROOT"

@@ -15,6 +15,7 @@
 | DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
 | 认证 | `dsh-auth-gate@0.12.0`，密码模式、Secure Cookie、可选 TOTP |
 | 可选工作台 | `dsh-better-sidebar@0.18.0` |
+| 可选交易工作台 | `@dshtrading/{base,crypto,us,cn,hk}@0.1.1`（非商业许可） |
 | Node | `24.14.0` |
 | Caddy | `2.10.2` |
 
@@ -133,7 +134,7 @@ docker rm dsh-server-kit
 # 使用上面的 docker run 命令重新启动；将镜像名改为 dsh-server-kit:next，Volume 仍为 dsh-data:/data。
 ```
 
-启动器会在不改写用户 Profile 的前提下检查版本组合；`/readyz` 未通过时，应切回上一个镜像标签并继续使用原 `dsh-data` Volume。
+启动器会更新受管理的 Profile 声明并检查版本组合；`/readyz` 未通过时，应切回上一个镜像标签，必要时恢复升级前的完整 Volume 快照。
 
 升级镜像时，启动器只会在镜像的受管理 Profile 声明发生变化时，从新镜像复制预构建的 `node_modules`、锁文件和 Profile 元数据到 `/data/dsh/profiles/web`；它不会在运行时执行包安装或下载，也不会改写 `/data/dsh` 里的管理员、会话、模型配置或 `/data/workspace`。这一步会自动修复早期镜像遗漏的 Auth Gate 依赖。
 
@@ -143,7 +144,43 @@ docker rm dsh-server-kit
 
 - `DSH_UI_PRESET=base`：上游 DSH Web UI + Auth Gate，默认且最小。
 - `DSH_UI_PRESET=workbench`：在同一个安全边界内预装 `dsh-better-sidebar`。v0.1 仅验证其锁定构建与容器启动；在补上真实浏览器功能验收前，不标为生产支持预置。
+- `DSH_UI_PRESET=trading`：上游 [DSH Trading](https://github.com/zhu1090093659/dsh-trading) 交易工作台，包含加密货币、美股、A 股、港股市场模块；登录后自动加载交易布局，不需要在插件页再次安装或开启。
 - `dsh-web-all`：不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
+
+### 启用 Trading
+
+Trading 是整站预置，不是在普通聊天页面叠加一个开关；一次只运行一个预置，避免多个侧边栏争用同一界面。默认仍为 `base`。
+
+先阅读 [第三方许可说明](THIRD_PARTY_NOTICES.md)：`dsh-trading` 使用 **PolyForm Noncommercial 1.0.0**，不是无限制商用的开源许可；商业用途需向上游取得适用授权。镜像包含这些包，即使未启用 Trading，也不要忽略其分发条款。
+
+新部署在前面的 `docker run` 命令中加入 `--env DSH_UI_PRESET=trading` 即可。已有部署先备份整个 `dsh-data`，从当前源码构建新镜像，再替换容器：
+
+```sh
+docker build --tag dsh-server-kit:trading .
+docker stop dsh-server-kit
+docker rm dsh-server-kit
+docker run --detach \
+  --name dsh-server-kit \
+  --restart unless-stopped \
+  --publish 127.0.0.1:8080:8080 \
+  --volume dsh-data:/data \
+  --env DSH_UI_PRESET=trading \
+  dsh-server-kit:trading
+```
+
+继续使用原来的域名、HTTPS 反代和 `/data` Volume。不要换成空卷，也不要同时让两个实例写同一个卷。已有管理员、模型配置与会话无需重新创建；等待 `/readyz` 返回 `200` 后刷新页面并登录。旧的已发布镜像未必包含此预置，以上命令使用当前源码构建。
+
+Trading 复用上游的行情、自选、图表、指标、策略、知识与交易审批功能。本仓库不另写行情接口或下单引擎。使用顺序：
+
+1. 在设置中配置模型提供方和模型凭据，再选择市场与行情来源。
+2. 在交易工作台添加自选标的，查看行情；需要 Agent 时选择相应市场的交易预设并创建会话。
+3. 默认使用上游模拟配置（`dryRun: true`、`liveTrading: false`），不要把安装成功理解为实盘已配置。实盘还需要券商/交易所账号、凭据及对应连接器配置；非模拟下单/撤单保留上游人工审批，不自动批准。
+
+部分行情来源需要 API Key、数据订阅或地区网络可达性；IBKR、QMT 等连接器还可能依赖额外网关/本机服务，这些服务并未随容器安装。四个市场模块已打包不代表所有券商都无需配置即可使用。此集成不保证行情可用性或交易结果。
+
+仍然只挂载 **`/data`**。Trading 按上游约定将自选、当前标的、指标、策略和知识写入 `/data/workspace/.dsh/`，托管的市场 Agent 预设写入 `/data/workspace/.dsh-trading-presets/`；这两个隐藏目录均在现有持久卷内。模型、交易来源设置与凭据继续由 DSH 管理。备份时不要排除隐藏目录。
+
+要恢复普通界面，用同一镜像和同一 Volume 重建容器，将 `DSH_UI_PRESET` 改回 `base`（或 `workbench`）。Trading 数据保留，之后可再次切回。Profile 的包声明、锁文件、bundle 和认证补丁由发行版管理，不要在其内手工 `pnpm add` 或改受管理文件。
 
 ### 公开域名配置模型与提供方
 
@@ -157,9 +194,9 @@ docker rm dsh-server-kit
 
 ## 升级与回滚
 
-每次升级只替换镜像，绝不覆盖 `/data`。启动前 `scripts/preflight-upgrade.mjs` 会检查 Profile 的依赖、bundle 顺序、锁文件和 Auth 配置 attestation；不匹配就 fail closed，不尝试“自动修复”或悄悄升级用户插件。
+每次升级替换镜像，保留 `/data` 中的业务数据。启动器只更新受管理的 Profile 依赖与声明；随后 `scripts/preflight-upgrade.mjs` 检查依赖、bundle 顺序、锁文件和 Auth 配置 attestation，仍不匹配就 fail closed，不运行在线包安装。
 
-升级动作：先对 `/data` Volume 建快照 → 记录当前 image digest → 部署新 digest → 等待 `/readyz` → 验证匿名请求得到 `401` 与登录流程。失败时切回上一个 digest；持久卷不应被新镜像迁移或修改。
+升级动作：先对 `/data` Volume 建快照 → 记录当前 image digest → 部署新 digest → 等待 `/readyz` → 验证匿名请求得到 `401` 与登录流程。失败时切回上一个 digest；若上游运行期间更改了业务数据格式，应恢复升级前的完整快照。
 
 ## 验证
 
@@ -169,4 +206,4 @@ node --test tests/unit/*.test.mjs
 node tests/integration/contract.mjs
 ```
 
-GitHub Actions 在 Node 24 下执行上述检查，并构建真实容器，确认 `readyz`、匿名 `401` 与 Auth Gate 状态端点。完整架构、组件准入和发布准则见 [执行计划](docs/EXECUTION_PLAN.md)。
+GitHub Actions 在 Node 24 下执行上述检查，并构建真实容器，确认 `readyz`、匿名 `401` 与 Auth Gate 状态端点。Trading 集成检查还会用隔离的临时数据启动真实 DSH，验证登录、交易 API/SSE 鉴权、四市场注册、浏览器启动清单和重启后的自选数据；不连接券商或发送订单。完整架构、组件准入和发布准则见 [执行计划](docs/EXECUTION_PLAN.md)。

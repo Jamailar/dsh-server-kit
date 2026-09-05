@@ -34,6 +34,31 @@
     "tini": "0.19.0"
   },
   "presets": {
+    "trading": {
+      "profile": "web",
+      "packages": {
+        "@deepseek-ai/cordis": "4.0.2",
+        "@deepseek-ai/dsh": "0.1.2-rc.1",
+        "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+        "@deepseek-ai/dsh-storage": "0.1.2-rc.1",
+        "dsh-auth-gate": "0.12.0",
+        "@dshtrading/base": "0.1.1",
+        "@dshtrading/crypto": "0.1.1",
+        "@dshtrading/us": "0.1.1",
+        "@dshtrading/cn": "0.1.1",
+        "@dshtrading/hk": "0.1.1"
+      },
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@dshtrading/base",
+        "@dshtrading/crypto",
+        "@dshtrading/us",
+        "@dshtrading/cn",
+        "@dshtrading/hk",
+        "dsh-auth-gate"
+      ]
+    },
     "base": {
       "profile": "web",
       "packages": {

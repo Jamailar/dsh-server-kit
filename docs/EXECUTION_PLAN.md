@@ -631,3 +631,28 @@ upgrade: mount old volumes, validate without rewriting, then start or fail close
 本机没有 Docker 时，只能完成 lock、配置、脚本和 status 单元验证；真实 image build、Caddy 运行时解析、DSH/Auth 启动和匿名拒绝由 `tests/integration/container-smoke.sh` 与 GitHub Actions 执行，不能把前者误报为完整容器验收。
 
 任何新增功能必须证明属于“安全远程访问、持久化、升级、部署或运维”之一；否则交给 DSH 或社区 Bundle。
+
+## 18. Trading 预置集成（2026-09-05）
+
+选择一个独立的 `DSH_UI_PRESET=trading` 发行预置，而不是复制上游 UI、在聊天页加入交易开关，或在生产容器临时下载插件。Trading 本身接管侧边栏、行情中栏和会话面板；与 `workbench` 同时启用会争用宿主插槽，因此三种预置互斥、默认仍为 `base`。
+
+完整链路：
+
+```text
+HTTPS → Caddy → Auth Gate → DSH Web + Trading 三栏布局
+                               ├─ 同源 /dshtrading/api + SSE（仍需 DSH 会话）
+                               ├─ Trading base + crypto/us/cn/hk bundles
+                               └─ 上游市场路由、行情、模拟交易、人工审批
+唯一 /data 卷
+  ├─ dsh：账号、会话、宿主设置与凭据、受管理 Profile
+  ├─ dsh-server：公开域名与运行状态
+  └─ workspace：用户文件、.dsh 交易数据、.dsh-trading-presets
+```
+
+- 必须复用：上游 Trading `0.1.1` 的市场连接器、工具、图表、自选、策略、知识、UI 与订单审批；现有 Auth Gate、DSH Settings、Caddy。不自研交易业务、凭据库、交易审批或新的账户体系。
+- 本仓库负责：锁定依赖闭包、镜像内预构建、启动预置选择、受管理 Profile 更新与完整性检查、单卷持久化和部署文档。
+- Trading Profile 自带与 runtime 相同的 DSH `0.1.2-rc.1` 闭包并使用 hoisted 布局，补齐上游 peer imports。Auth Gate 的 storage-domain peer 与此版本对齐；构建检查禁止混入不同 DSH 版本，React/React DOM 固定为配套版本。两个 DSH 客户端副本都应用已有远程模型设置补丁。
+- 开关位于部署配置，不增加自研网页按钮。更新镜像并指定 `trading` 后，继续挂载原 `/data` 即可；切回 `base` 只切换受管理 Profile，保留业务数据。禁止多实例共写一个卷。
+- 不启用真实交易、不写入券商凭据。上游市场预设保持 `dryRun: true`、`liveTrading: false`；下单/撤单非明确模拟调用沿用上游人工审批。外部网关和行情订阅不属于镜像。
+- 上游采用 PolyForm Noncommercial 1.0.0，必须分发第三方许可通知并明确非商业限制，不能将 Trading 宣称为无限制商用的开源组件。
+- 验收：真实 DSH 启动、管理员创建与登录、四市场注册、匿名 API/SSE 拒绝、UI 启动清单、审批判定与自选重启持久化；CI 再检查真实容器非 root 运行和已初始化 Volume 的 base → trading → base 切换。行情供应商连通性、真实券商账户与实盘不在自动测试范围。

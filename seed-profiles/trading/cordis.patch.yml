@@ -1,0 +1,5 @@
+- id: dsh-auth-gate
+  config:
+    mode: password
+    totp: optional
+    cookieSecure: true

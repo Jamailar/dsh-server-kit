@@ -23,13 +23,17 @@ COPY scripts/enable-remote-settings.mjs /app/scripts/enable-remote-settings.mjs
 RUN node /app/scripts/enable-remote-settings.mjs --runtime /app/runtime \
  && pnpm --dir /opt/dsh-seed/base install --frozen-lockfile --prod \
  && pnpm --dir /opt/dsh-seed/workbench install --frozen-lockfile --prod \
+ && pnpm --dir /opt/dsh-seed/trading install --frozen-lockfile --prod \
+ && node /app/scripts/enable-remote-settings.mjs --runtime /opt/dsh-seed/trading \
  && auth_smoke_home="$(mktemp -d)" \
  && printf '%s\n' 'build-only-auth-gate-password' | DSH_HOME="$auth_smoke_home" node /opt/dsh-seed/base/node_modules/dsh-auth-gate/lib/cli.js user add build-smoke --password-stdin \
  && test -s "$auth_smoke_home/auth/users.yaml" \
  && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/base \
  && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/workbench \
+ && node /app/scripts/brand-auth-gate-login.mjs --profile /opt/dsh-seed/trading \
  && node /app/scripts/build-seed-profile.mjs --preset base --profile /opt/dsh-seed/base \
- && node /app/scripts/build-seed-profile.mjs --preset workbench --profile /opt/dsh-seed/workbench
+ && node /app/scripts/build-seed-profile.mjs --preset workbench --profile /opt/dsh-seed/workbench \
+ && node /app/scripts/build-seed-profile.mjs --preset trading --profile /opt/dsh-seed/trading
 
 FROM ${CADDY_IMAGE} AS caddy
 
@@ -48,6 +52,7 @@ COPY config /app/config
 COPY src /app/src
 COPY scripts /app/scripts
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
+COPY THIRD_PARTY_NOTICES.md /app/THIRD_PARTY_NOTICES.md
 RUN chmod 0755 /app/docker/entrypoint.sh \
  && /usr/bin/caddy fmt --overwrite /app/config/Caddyfile \
  && mkdir -p /data/dsh /data/dsh-server /data/workspace \

@@ -2,16 +2,19 @@
 set -euo pipefail
 
 image_tag="dsh-server-kit:ci-${GITHUB_RUN_ID:-local}"
-container_name="dsh-server-kit-smoke-${GITHUB_RUN_ID:-local}"
+container_name="dsh-server-kit-smoke-${GITHUB_RUN_ID:-local}-$$"
+volume_name="${container_name}-data"
 host_port="18080"
 
 cleanup() {
   docker rm -f "$container_name" >/dev/null 2>&1 || true
+  docker volume rm "$volume_name" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 docker build --pull=false --tag "$image_tag" .
 docker run --detach --name "$container_name" \
+  --volume "${volume_name}:/data" \
   --publish "127.0.0.1:${host_port}:8080" \
   "$image_tag" >/dev/null
 
@@ -46,3 +49,34 @@ done
 curl --silent --fail -H "Host: localhost:${host_port}" "http://127.0.0.1:${host_port}/readyz" | grep -F '"ready"'
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H "Host: localhost:${host_port}" -H 'Accept: application/json' "http://127.0.0.1:${host_port}/")" = "401"
 curl --silent --fail -H "Host: localhost:${host_port}" "http://127.0.0.1:${host_port}/auth/status" | grep -F '"authenticated":false'
+
+# Exercise the actual Trading seed and runtime as the unprivileged service user.
+# This uses its own temporary home and does not send market/broker requests.
+docker cp tests/integration/trading-smoke.mjs "$container_name:/tmp/trading-smoke.mjs"
+docker exec --user dsh "$container_name" node /tmp/trading-smoke.mjs /opt/dsh-seed/trading /app/runtime
+
+# Switch a previously initialized base volume to Trading, then back. Each boot
+# must repair managed metadata without resetting the account or requiring setup.
+for preset in trading base; do
+  docker rm -f "$container_name" >/dev/null
+  docker run --detach --name "$container_name" \
+    --volume "${volume_name}:/data" \
+    --env "DSH_UI_PRESET=${preset}" \
+    --publish "127.0.0.1:${host_port}:8080" \
+    "$image_tag" >/dev/null
+  for _ in $(seq 1 90); do
+    if curl --silent --fail --output /dev/null -H "Host: localhost:${host_port}" "http://127.0.0.1:${host_port}/readyz"; then break; fi
+    sleep 2
+  done
+  curl --silent --fail -H "Host: localhost:${host_port}" "http://127.0.0.1:${host_port}/readyz" | grep -F '"ready"'
+  test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    -H "Host: localhost:${host_port}" \
+    --data-urlencode 'username=admin' \
+    --data-urlencode 'password=ci-only-not-a-production-secret' \
+    "http://127.0.0.1:${host_port}/auth/login")" = "302"
+  if [ "$preset" = trading ]; then
+    test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+      -H "Host: localhost:${host_port}" -H 'Accept: application/json' \
+      "http://127.0.0.1:${host_port}/dshtrading/api/markets")" = "401"
+  fi
+done

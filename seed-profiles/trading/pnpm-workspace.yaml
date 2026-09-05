@@ -1,0 +1,14 @@
+packages:
+  - .
+
+# Trading host plugins import DSH peers directly. Ship the complete, matching
+# DSH closure in this profile instead of relying on runtime module fallbacks.
+nodeLinker: hoisted
+autoInstallPeers: true
+
+# Auth Gate's older peer range must resolve to this profile's DSH API, and the
+# renderer needs matching React / React DOM majors.
+overrides:
+  '@deepseek-ai/dsh-storage-domain': 0.1.2-rc.1
+  react: 18.3.1
+  react-dom: 18.3.1
