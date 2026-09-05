@@ -348,6 +348,35 @@ test('Auth Gate branding patch adds the DeepSeek title and mark without touching
   assert.equal(await readFile(loginPage, 'utf8'), branded)
 })
 
+test('remote settings patch enables the pinned DSH client only', async () => {
+  const runtimeDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-runtime-'))
+  const packageDir = join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-client-ui-settings')
+  const clientPath = join(packageDir, 'lib', 'client.js')
+  await mkdir(join(packageDir, 'lib'), { recursive: true })
+  await writeFile(join(packageDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-client-ui-settings', version: '0.1.2-rc.1' }))
+  await writeFile(clientPath, 'function apply(ctx) {\n\t\t\tconst persistence = ctx.remote.$host.isLoopback ? "host" : "memory";\n}\n')
+
+  async function applyPatch() {
+    const child = spawn(process.execPath, ['scripts/enable-remote-settings.mjs', '--runtime', runtimeDir], {
+      cwd: new URL('.', projectRoot),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const completed = new Promise((resolve, reject) => child.once('exit', resolve).once('error', reject))
+    let stderr = ''
+    for await (const chunk of child.stderr) stderr += chunk
+    const exitCode = await completed
+    assert.equal(exitCode, 0, stderr)
+  }
+
+  await applyPatch()
+  const patched = await readFile(clientPath, 'utf8')
+  assert.match(patched, /dsh-server-kit-remote-settings-v1/)
+  assert.match(patched, /const persistence = "host";/)
+  assert.doesNotMatch(patched, /isLoopback \? "host" : "memory"/)
+  await applyPatch()
+  assert.equal(await readFile(clientPath, 'utf8'), patched)
+})
+
 test('release manifest, seed locks, and Caddy trust boundary are internally consistent', async () => {
   const manifest = JSON.parse(await readFile(new URL('config/release-manifest.json', projectRoot), 'utf8'))
   assert.equal(manifest.runtime.dsh.version, '0.1.2-rc.1')
@@ -382,6 +411,7 @@ test('release manifest, seed locks, and Caddy trust boundary are internally cons
 
   const dockerfile = await readFile(new URL('Dockerfile', projectRoot), 'utf8')
   assert.match(dockerfile, /dsh-auth-gate\/lib\/cli\.js user add build-smoke --password-stdin/)
+  assert.match(dockerfile, /enable-remote-settings\.mjs --runtime \/app\/runtime/)
   const entrypoint = await readFile(new URL('docker/entrypoint.sh', projectRoot), 'utf8')
   assert.match(entrypoint, /repair_seed_profile_if_needed/)
   assert.match(entrypoint, /seed_profile_dependencies_repaired/)

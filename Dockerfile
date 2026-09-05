@@ -19,7 +19,9 @@ COPY seed-profiles /opt/dsh-seed
 COPY config /app/config
 COPY scripts/build-seed-profile.mjs /app/scripts/build-seed-profile.mjs
 COPY scripts/brand-auth-gate-login.mjs /app/scripts/brand-auth-gate-login.mjs
-RUN pnpm --dir /opt/dsh-seed/base install --frozen-lockfile --prod \
+COPY scripts/enable-remote-settings.mjs /app/scripts/enable-remote-settings.mjs
+RUN node /app/scripts/enable-remote-settings.mjs --runtime /app/runtime \
+ && pnpm --dir /opt/dsh-seed/base install --frozen-lockfile --prod \
  && pnpm --dir /opt/dsh-seed/workbench install --frozen-lockfile --prod \
  && auth_smoke_home="$(mktemp -d)" \
  && printf '%s\n' 'build-only-auth-gate-password' | DSH_HOME="$auth_smoke_home" node /opt/dsh-seed/base/node_modules/dsh-auth-gate/lib/cli.js user add build-smoke --password-stdin \
