@@ -43,12 +43,25 @@ Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。�
 
 本项目的推荐方式是直接构建仓库根目录的 `Dockerfile`。运行时不需要管理员、密码或域名环境变量；首次浏览器初始化会把非敏感域名配置和密码哈希状态写入持久化数据目录。
 
-### 1. 构建镜像并创建唯一持久卷
+### 1. 拉取发布镜像或从源码构建
+
+正式版本同时发布到 GitHub Container Registry。生产部署建议使用精确版本 tag：
+
+```sh
+docker pull ghcr.io/jamailar/dsh-server-kit:0.1.0
+```
+
+`0.1` 跟随该 minor 版本的后续补丁；`0.1.0` 始终指向本次发布。若要从源码自行构建：
 
 ```sh
 git clone https://github.com/Jamailar/dsh-server-kit.git
 cd dsh-server-kit
 docker build --tag dsh-server-kit:latest .
+```
+
+然后创建唯一持久卷：
+
+```sh
 docker volume create dsh-data
 ```
 
@@ -66,8 +79,10 @@ docker run --detach \
   --restart unless-stopped \
   --publish 127.0.0.1:8080:8080 \
   --volume dsh-data:/data \
-  dsh-server-kit:latest
+  ghcr.io/jamailar/dsh-server-kit:0.1.0
 ```
+
+若使用上一步本地构建的镜像，将最后一行改为 `dsh-server-kit:latest`。
 
 反向代理必须终止 HTTPS、保留浏览器请求的原始 `Host`，并将请求转发给 `http://127.0.0.1:8080`。不要发布 DSH 内部的 `3080` 或状态端口 `9000`。直接 HTTP 只能用于健康检查，不能登录：认证 Cookie 强制 `Secure`。
 
