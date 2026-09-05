@@ -350,7 +350,7 @@ test('Auth Gate branding patch adds the DeepSeek title and mark without touching
 
 test('remote settings patch enables the pinned DSH client only', async () => {
   const runtimeDir = await mkdtemp(join(tmpdir(), 'dsh-server-kit-runtime-'))
-  const packageDir = join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-client-ui-settings')
+  const packageDir = join(runtimeDir, 'node_modules', '.pnpm', '@deepseek-ai+dsh-client-ui-settings@0.1.2-rc.1_fixture', 'node_modules', '@deepseek-ai', 'dsh-client-ui-settings')
   const clientPath = join(packageDir, 'lib', 'client.js')
   await mkdir(join(packageDir, 'lib'), { recursive: true })
   await writeFile(join(packageDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-client-ui-settings', version: '0.1.2-rc.1' }))
