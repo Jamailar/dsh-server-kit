@@ -142,10 +142,37 @@ docker rm dsh-server-kit
 
 ## 预置与边界
 
-- `DSH_UI_PRESET=base`：上游 DSH Web UI + Auth Gate，默认且最小。
-- `DSH_UI_PRESET=workbench`：在同一个安全边界内预装 `dsh-better-sidebar`。v0.1 仅验证其锁定构建与容器启动；在补上真实浏览器功能验收前，不标为生产支持预置。
-- `DSH_UI_PRESET=trading`：上游 [DSH Trading](https://github.com/zhu1090093659/dsh-trading) 交易工作台，包含加密货币、美股、A 股、港股市场模块；登录后自动加载交易布局，不需要在插件页再次安装或开启。
-- `dsh-web-all`：不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
+`DSH_UI_PRESET` 是部署级启动配置，而不是网页内的即时开关。它决定 DSH 启动时装载的锁定依赖、Profile Bundle 和页面模块；一次容器启动只能选择一个预置。未设置时默认使用 `base`。
+
+| 值 | 界面与定位 | 来源仓库 | 状态 |
+| --- | --- | --- | --- |
+| `base`（默认） | 官方 DSH Web UI + 密码登录 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)、[dsh-auth-gate](https://github.com/zephaniahwang94-cmyk/dsh-auth-gate) | 默认、最小预置 |
+| `workbench` | `base` 加上文件、编辑、终端、Git 和浏览器侧边栏工作台 | [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)；同时复用 `base` 的两个来源 | 已锁定构建；尚未完成完整浏览器功能验收，不标为生产支持 |
+| `trading` | 加密货币、美股、A 股、港股交易工作台 | [dsh-trading](https://github.com/zhu1090093659/dsh-trading)；同时复用 `base` 的两个来源 | 已集成；受 PolyForm Noncommercial 1.0.0 非商业许可约束 |
+
+`dsh-web-all` 不在镜像中安装。它的 SSH、远程配对、计划任务等能力需在克隆 Volume 上单独审计；本项目不自动安装或升级它。
+
+### 切换 Preset
+
+切换预置需要修改容器环境变量并**重建容器**；不能在已打开的网页内即时切换。原因是切换会更换 DSH 的启动依赖与 UI 模块，必须由一个完整的新进程加载。切换时使用同一个 `/data` Volume，管理员、模型配置、工作区和各预置的数据都会保留。
+
+例如，切换到 Trading：
+
+```sh
+docker stop dsh-server-kit
+docker rm dsh-server-kit
+docker run --detach \
+  --name dsh-server-kit \
+  --restart unless-stopped \
+  --publish 127.0.0.1:8080:8080 \
+  --volume dsh-data:/data \
+  --env DSH_UI_PRESET=trading \
+  dsh-server-kit:latest
+```
+
+切回默认界面时，移除 `--env DSH_UI_PRESET=trading`，或显式改成 `--env DSH_UI_PRESET=base`，然后用同一个 `/data` Volume 重建容器。切换到 `workbench` 时将值改为 `workbench`。先备份 `/data`，不要让两个容器同时写同一个 Volume。
+
+新预置也遵循此模型：先在镜像中以精确版本集成、锁定依赖并通过验证，才可以使用 `DSH_UI_PRESET=<名称>` 启动；任意输入一个社区包名不会让容器在运行时自动安装它。
 
 ### 启用 Trading
 
