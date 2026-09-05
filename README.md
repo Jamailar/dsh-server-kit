@@ -1,5 +1,9 @@
 # DSH Server Kit
 
+> A secure, Docker-first server distribution for DeepSeek Harness with web setup, password authentication, persistent storage, health checks, and repeatable upgrades.
+
+![DSH Server Kit sign-in screen](docs/assets/dsh-server-kit-login.jpg)
+
 把上游 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 封装为可部署、可升级的单管理员服务器发行版。
 
 它不是新的 DSH UI 或 Gateway。DSH 提供 UI 与 Agent runtime；`dsh-auth-gate` 负责登录、会话以及 HTTP/WebSocket 守卫；Caddy 只提供安全反代；本仓库只负责不可变依赖、首启、健康状态、升级检查与部署契约。
@@ -33,7 +37,7 @@ HTTPS / reverse proxy
 
 Caddy 也会在入口以 `421` 拒绝任何不等于该 authority 的 `Host`。这个 authority 在首次 Web 初始化时持久化，之后由启动器自动提供给 DSH 与 Caddy，无需持续配置环境变量。
 
-端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*`、`X-Real-IP` 和 `X-Dsh-Proxy`。登录限流应在外层反向代理或边缘网络配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
+端口 `3080` 与 `9000` 从不发布。Caddy 删除客户端伪造的 `Forwarded`、`X-Forwarded-*` 和 `X-Real-IP`。`dsh-auth-proxy --mark-proxy` 使用的 `X-Dsh-Proxy` 会被保留为只会收窄宿主能力的标记，伪造该标记也不能获得任何权限。登录限流应在外层反向代理或边缘网络配置；Auth Gate 在容器内看到的是 Caddy，而非真实客户端 IP。
 
 ## 使用 Dockerfile 部署
 
